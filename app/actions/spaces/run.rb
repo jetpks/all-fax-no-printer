@@ -57,11 +57,7 @@ module Space
             return [] unless run.conversation_id
 
             conversation = conversations_repo.with_messages(run.conversation_id)
-            return [] unless conversation
-
-            Space::Server::Transcript::Turn.group(conversation.messages).map do |t|
-              Serializers::Conversation.turn_json(t, owner: owner)
-            end
+            Serializers::Conversation.turns_for(conversation, owner: owner)
           end
         end
       end
