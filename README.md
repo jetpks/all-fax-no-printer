@@ -22,7 +22,10 @@ changed.
   annotations, and read-only share links.
 - **Runs** — streaming trace ingest from `architect dispatch` over SSE
   (`POST /runs` + `POST /runs/:id/ingest` push traces, `/runs/:id/stream`
-  renders them live).
+  renders them live). Ingest answers `202` with `{id, status, events}` — plus
+  `error` when the stream failed — and a body that parses but yields no
+  recognizable events fails the run visibly instead of leaving it `live`
+  forever.
 - **Spaces** — importing architect-loop space directories (iterations,
   artifacts, transcripts) for browsing.
 - **Jobs** — the inference-job pipeline (`lib/space/server/jobs/`): sandboxed
@@ -69,7 +72,8 @@ required; bearer is for the data API, not this page). Minting takes only a
 name: the server generates the secret (`sat_` + 64 hex chars, from
 `SecureRandom.hex(32)`), shows it **exactly once** in the mint response, and
 persists only its SHA-256 hex digest in `api_tokens.token_hash` (unique index).
-The plaintext is never stored and cannot be recovered — store it at mint time.
+The plaintext is never stored and cannot be recovered — the mint view shows it
+exactly once, with a copy-to-clipboard affordance, so store it then.
 Revocation is soft (`revoked_at` stamp), so mint history stays auditable.
 
 Requests carrying `Authorization: Bearer <token>` authenticate **as the
@@ -104,10 +108,15 @@ Guards, all enforced before an import can happen:
 | Tar entry with an absolute path or a `..` component   | 400    |
 | Tar entry that is a symlink (or any non-file/dir type)| 400    |
 | Invalid gzip or tar stream                            | 400    |
+| Bundle unpacking past 256MB total extracted bytes    | 400    |
 | Extracted bundle missing `space.yaml`                 | 400    |
 
 Every tar entry header is validated before anything is extracted — a single
-unsafe entry means nothing is extracted or imported. Extraction happens into
+unsafe entry means nothing is extracted or imported. Long names carried as
+GNU `L` entries or PAX `path=` records are resolved to their true names
+before the traversal guard runs — a `..` smuggled through either rejects the
+whole bundle, and a legitimate >100-char path imports under its full name.
+Extraction happens into
 a fresh temporary directory that is removed after the import; no bundle
 content is ever written outside it.
 
