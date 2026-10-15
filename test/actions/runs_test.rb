@@ -89,6 +89,7 @@ class RunsActionTest < Minitest::Test
       assert_equal run.id, data["id"]
       assert data["events"] > 0, "Expected events > 0"
       assert_equal "complete", data["status"]
+      refute data.key?("error"), "success must not carry an error key"
     end
   end
 
@@ -119,6 +120,8 @@ class RunsActionTest < Minitest::Test
     assert_equal 0, data["events"]
     # I05: a zero-event stream must fail visibly, not be left :live forever.
     assert_equal "failed", data["status"]
+    # …and carry the why, not just the verdict (I05 residue, fixed inline).
+    assert_equal "Stream contained no recognizable events.", data["error"]
     updated = @runs_repo.by_pk(run.id)
     assert_equal :failed, updated.status, "run status must be failed (3) on zero events"
   end

@@ -141,6 +141,7 @@ module Space
             ALLOWED_TYPES = %w[0 \x00 5 x g L K].freeze
             SKIP_TYPES    = %w[x g L K].freeze
             GNU_LONG_NAME = "L"
+            PAX_HEADER    = "x"
 
             # Frozen cap on total bytes written across all entries. Enforced on
             # both passes: validate! sums the declared header sizes (nothing
@@ -192,28 +193,43 @@ module Space
               raise BundleError, "Not a valid tar stream."
             end
 
-            # Walks entries applying the GNU long-name rule: an "L" entry's
-            # content names the NEXT entry (the reader does not resolve it for
-            # us), so every yielded name is the resolved one — and the one the
-            # traversal guard sees. "K" (long-link target) is accepted and
-            # discarded: links are never extracted. The type guard runs here so
-            # both passes reject unsafe entries identically.
+            # Walks entries resolving long names before the traversal guard
+            # sees them: a GNU "L" entry's content names the NEXT entry, and a
+            # PAX "x" entry's path= record overrides the next entry's
+            # (truncated) ustar name — the reader resolves neither for us, so
+            # every yielded name is the resolved one, and the one the guard
+            # checks. "K" (long-link target) and "g" (global metadata) are
+            # accepted and discarded: links are never extracted. The type
+            # guard runs here so both passes reject unsafe entries identically.
             def each_resolved_entry
-              long_name = nil
+              pending_name = nil
               each_entry do |entry|
                 type = entry.header.typeflag
                 unless ALLOWED_TYPES.include?(type)
                   raise BundleError, "Unsafe tar entry #{entry.full_name.inspect} (type #{type.inspect})"
                 end
-                long_name = entry.read.unpack1("Z*") if type == GNU_LONG_NAME
+                case type
+                when GNU_LONG_NAME then pending_name = entry.read.unpack1("Z*")
+                when PAX_HEADER    then pending_name = pax_path_from(entry.read)
+                end
                 next if SKIP_TYPES.include?(type)
 
-                name = long_name || entry.full_name
-                long_name = nil
+                name = pending_name || entry.full_name
+                pending_name = nil
                 raise BundleError, "Unsafe tar path #{name.inspect}" unless safe_name?(name)
 
                 yield entry, name
               end
+            end
+
+            # A PAX extended header carries length-prefixed records
+            # "<len> key=value\n"; a path= record overrides the next entry's
+            # ustar name field. Records are length-delimited to permit
+            # embedded newlines, which a path never contains — a line scan is
+            # sound.
+            def pax_path_from(body)
+              record = body.scan(/\d+ ([^\n]+)\n/).flatten.find { |r| r.start_with?("path=") }
+              record&.delete_prefix("path=")
             end
 
             def safe_name?(name)

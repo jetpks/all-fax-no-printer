@@ -295,6 +295,13 @@ class SpacesImportTest < Minitest::Test
 
   def long_note_name = "notes/#{"n" * 140}.md" # 146-char path, unrepresentable in ustar name+
 
+  # A PAX record is "<len> key=value\n" where <len> counts the whole record
+  # including itself; 3 digits + 1 space covers every path these tests use.
+  def pax_path_record(name)
+    record = "path=#{name}\n"
+    "#{record.bytesize + 4} #{record}"
+  end
+
   def test_long_name_via_gnu_l_entry_imports_cleanly
     secret = mint_token
     status, _, body = post_raw(
@@ -377,5 +384,72 @@ class SpacesImportTest < Minitest::Test
     assert_match(/256|unpacks/, parse_json(body)["error"])
     assert_equal 0, conn[:spaces].count, "nothing may be imported"
     assert_equal 0, conn[:artifacts].count, "no partial import"
+  end
+
+  # ── PAX x path= overrides (I05 residue, fixed inline) ───────────────
+
+  def test_long_name_via_pax_path_record_imports_cleanly
+    secret = mint_token
+    status, _, body = post_raw(
+      "/spaces/import",
+      body: gzip(tar_bytes([
+        ["space.yaml", body: <<~YAML],
+          id: pushed-pax
+          title: Pushed Pax
+          status: active
+          architect:
+            status: active
+            iterations: []
+        YAML
+        ["notes", typeflag: "5"],
+        ["PaxHeaders.0", body: pax_path_record(long_note_name), typeflag: "x"],
+        [long_note_name[0, 99], body: "# Long note\n"]
+      ])),
+      content_type: "application/gzip",
+      bearer: secret
+    )
+
+    assert_equal 200, status, "long path via PAX must import (got #{parse_json(body)['error']})"
+    note = conn[:artifacts].where(space_id: parse_json(body)["id"], kind: "note").first
+    refute_nil note, "the long-named note must be imported"
+    assert_equal long_note_name, note[:path], "the PAX-resolved (not truncated) name must be stored"
+  end
+
+  def test_traversal_path_via_pax_record_rejected_with_400_and_nothing_imported
+    secret = mint_token
+    cwd_files = Dir.children(Dir.pwd)
+
+    status, _, body = post_raw(
+      "/spaces/import",
+      body: gzip(tar_bytes([
+        ["space.yaml", body: "id: evil-pax\n"],
+        ["PaxHeaders.0", body: pax_path_record("../../../../etc/evil"), typeflag: "x"],
+        ["trunc", body: "pwned"]
+      ])),
+      content_type: "application/gzip",
+      bearer: secret
+    )
+
+    assert_equal 400, status
+    assert_match(/Unsafe tar path/, parse_json(body)["error"])
+    assert_equal 0, conn[:spaces].count, "nothing may be imported"
+    assert_equal cwd_files, Dir.children(Dir.pwd), "no file may escape the extraction dir"
+  end
+
+  def test_pax_header_without_path_record_is_tolerated
+    secret = mint_token
+    status, _, body = post_raw(
+      "/spaces/import",
+      body: gzip(tar_bytes([
+        ["space.yaml", body: "id: pushed-pax-mtime\n"],
+        ["PaxHeaders.0", body: "30 mtime=1760000000.000000000\n", typeflag: "x"],
+        ["README.md", body: "# fine\n"]
+      ])),
+      content_type: "application/gzip",
+      bearer: secret
+    )
+
+    assert_equal 200, status, "a metadata-only PAX header must not fail the bundle"
+    assert_equal "pushed-pax-mtime", parse_json(body)["slug"]
   end
 end

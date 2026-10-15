@@ -35,7 +35,9 @@ module Space
             runs_repo.update(run.id, status: final_status, conversation_id: persistor.conversation_id, updated_at: Time.now)
 
             status_label = { 1 => :live, 2 => :complete, 3 => :failed }.fetch(final_status)
-            render_json(res, { id: run.id, status: status_label, events: result[:events] }, status: 202)
+            json = { id: run.id, status: status_label, events: result[:events] }
+            json[:error] = result[:error] if result[:error] # the why, not just the verdict
+            render_json(res, json, status: 202)
           end
 
           private
