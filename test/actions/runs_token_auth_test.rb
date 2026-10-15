@@ -12,9 +12,11 @@ class RunsTokenAuthTest < Minitest::Test
 
   def setup
     setup_db
+    Space::Server::App["db.gateway"].connection[:api_tokens].delete
     OmniAuth.config.test_mode = true
     @owner     = Factory[:user, github_uid: "ingest-owner", username: "ingest_owner"]
     @runs_repo = Space::Server::App["repos.runs_repo"]
+    @api_tokens_repo = Space::Server::App["repos.api_tokens_repo"]
     @settings  = Space::Server::App["settings"]
   end
 
@@ -28,6 +30,110 @@ class RunsTokenAuthTest < Minitest::Test
       @settings.stub(:ingest_user_id, user_id) do
         yield
       end
+    end
+  end
+
+  # --- Per-user API tokens (sat_…) — mint → use → ownership → revoke → 401 ---
+  # The per-user path needs no INGEST_TOKEN settings, so these run unstubbed —
+  # the global path stays off by default exactly as in production.
+
+  def mint_token(user, name = "cli")
+    @api_tokens_repo.create(user_id: user.id, name: name)
+  end
+
+  def test_per_user_token_create_returns_201_owned_by_token_owner
+    user = Factory[:user, github_uid: "token-owner", username: "token_owner"]
+    secret, = mint_token(user)
+
+    status, _, body = post("/runs", bearer: secret)
+    assert_equal 201, status
+    run = @runs_repo.by_pk(parse_json(body)["id"])
+    assert_equal user.id, run.user_id, "run must be owned by the token's owner, not ingest_user_id"
+  end
+
+  def test_per_user_token_ingest_returns_202_with_events
+    user = Factory[:user, github_uid: "token-ingest-owner", username: "token_ingest_owner"]
+    secret, = mint_token(user)
+
+    _, _, body = post("/runs", bearer: secret)
+    run_id = parse_json(body)["id"]
+    Sync do
+      status, _, body = post_raw("/runs/#{run_id}/ingest", body: FIXTURE_JSONL, bearer: secret)
+      assert_equal 202, status
+      assert parse_json(body)["events"] > 0
+    end
+  end
+
+  def test_per_user_token_cannot_ingest_foreign_run
+    token_user = Factory[:user, github_uid: "token-foreign", username: "token_foreign"]
+    secret, = mint_token(token_user)
+    run = Factory[:run, user_id: @owner.id, status: 0]
+
+    status, _, body = post("/runs/#{run.id}/ingest", bearer: secret)
+    assert_equal 403, status
+    assert parse_json(body).key?("error")
+  end
+
+  def test_revoked_token_returns_401
+    user = Factory[:user, github_uid: "token-revoked", username: "token_revoked"]
+    secret, token = mint_token(user)
+    assert_equal 201, post("/runs", bearer: secret)[0]
+
+    @api_tokens_repo.revoke(token.id)
+    status, _, body = post("/runs", bearer: secret)
+    assert_equal 401, status
+    assert parse_json(body).key?("error")
+  end
+
+  def test_successful_use_touches_last_used_at
+    user = Factory[:user, github_uid: "token-touch", username: "token_touch"]
+    secret, token = mint_token(user)
+    assert_nil @api_tokens_repo.by_pk(token.id).last_used_at
+
+    post("/runs", bearer: secret)
+    refute_nil @api_tokens_repo.by_pk(token.id).last_used_at
+  end
+
+  def test_per_user_token_wins_over_configured_global_token
+    user = Factory[:user, github_uid: "token-precedence", username: "token_precedence"]
+    secret, = mint_token(user)
+
+    with_token_settings do
+      status, _, body = post("/runs", bearer: secret)
+      assert_equal 201, status
+      run = @runs_repo.by_pk(parse_json(body)["id"])
+      assert_equal user.id, run.user_id, "per-user token must win over the global fallback"
+    end
+  end
+
+  def test_rejected_bearer_warn_logs_path_without_token_material
+    user = Factory[:user, github_uid: "token-log", username: "token_log"]
+    secret, = mint_token(user)
+    captured = CapturingLogger.new
+
+    Hanami.stub(:logger, captured) do
+      status, _, _ = post("/runs", bearer: "wrong-token")
+      assert_equal 401, status
+    end
+
+    line = captured.lines.join("\n")
+    assert line.include?("path=/runs"), "failure log carries the path"
+    assert line.include?("outcome"), "failure log carries the outcome"
+    refute line.include?("wrong-token"), "failure log must never carry token material"
+    refute line.include?(secret), "failure log must never carry the presented bearer"
+  end
+
+  # Minimal warn-capturing stand-in for Hanami.logger — only warn is called on
+  # the bearer-rejection path under test.
+  class CapturingLogger
+    attr_reader :lines
+
+    def initialize
+      @lines = []
+    end
+
+    def warn(message)
+      @lines << message.to_s
     end
   end
 

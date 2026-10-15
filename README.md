@@ -58,7 +58,29 @@ npm run check          # TypeScript type check
 
 ## Ingest Token Auth
 
-Machine pushes (e.g. from the CLI dispatch harness) authenticate via a shared secret:
+Machine pushes (e.g. from the CLI dispatch harness) authenticate with a bearer
+token. Per-user API tokens are the primary path; the shared `INGEST_TOKEN`
+remains as legacy back-compat.
+
+### Per-user API tokens (primary)
+
+Each user mints named tokens at **API tokens** (`/api_tokens` — session sign-in
+required; bearer is for the data API, not this page). Minting takes only a
+name: the server generates the secret (`sat_` + 64 hex chars, from
+`SecureRandom.hex(32)`), shows it **exactly once** in the mint response, and
+persists only its SHA-256 hex digest in `api_tokens.token_hash` (unique index).
+The plaintext is never stored and cannot be recovered — store it at mint time.
+Revocation is soft (`revoked_at` stamp), so mint history stays auditable.
+
+Requests carrying `Authorization: Bearer <token>` authenticate **as the
+token's owner** on the bearer endpoints (`POST /runs`, `POST
+/runs/:id/ingest`); ownership and visibility then flow per-user with no
+further configuration. Lookup is a unique-index hit on the presented token's
+SHA-256 digest — never a linear scan or plaintext comparison. Every use
+touches `last_used_at` on the token row. Failed bearer attempts warn-log
+request path and outcome only — never token material.
+
+### Legacy global INGEST_TOKEN (back-compat)
 
 | Env var             | Description                                      |
 |---------------------|--------------------------------------------------|
@@ -66,9 +88,18 @@ Machine pushes (e.g. from the CLI dispatch harness) authenticate via a shared se
 | `INGEST_USER_ID`    | Integer user ID that ingested runs are owned by (plain config, not a secret) |
 | `INGEST_TOKEN_REF`  | op:// ref `bin/serve` resolves `INGEST_TOKEN` from (default `op://ansible/space-architect-server/ingest-token`) |
 
-When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are authenticated as the configured user and bypass CSRF (machine pushes carry no session cookie). Browser/cookie requests are unaffected and continue to enforce CSRF normally.
+When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are
+authenticated as the configured user and bypass CSRF (machine pushes carry no
+session cookie). Browser/cookie requests are unaffected and continue to
+enforce CSRF normally. Deployed CLI setups configured this way keep working
+unchanged; per-user tokens take precedence when a presented bearer matches
+one.
 
-Production boot (`bin/serve`) resolves `INGEST_TOKEN` from the 1Password ref above on every start, so cold-restarting falcon no longer strands ingest auth on a hand-minted, unrecoverable token. A directly-set `INGEST_TOKEN` in the environment bypasses op resolution entirely and is used as-is (`bin/dev`, `bin/live_proof.rb`, and other dev/test flows that mint their own token).
+Production boot (`bin/serve`) resolves `INGEST_TOKEN` from the 1Password ref
+above on every start, so cold-restarting falcon no longer strands ingest auth
+on a hand-minted, unrecoverable token. A directly-set `INGEST_TOKEN` in the
+environment bypasses op resolution entirely and is used as-is (`bin/dev`,
+`bin/live_proof.rb`, and other dev/test flows that mint their own token).
 
 ## Deploy
 
