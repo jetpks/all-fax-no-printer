@@ -69,6 +69,13 @@ module Space
       get  "/providers/:id/models",  to: "providers.models"
       get  "/providers/:id/pi_extension", to: "providers.pi_extension"
 
+      # API tokens (per-user machine auth — mint/revoke; session-auth'd UI,
+      # same convention as profiles/providers: POST …/delete for the revoke)
+      get  "/api_tokens",            to: "api_tokens.index"
+      get  "/api_tokens/new",        to: "api_tokens.new"
+      post "/api_tokens",            to: "api_tokens.create"
+      post "/api_tokens/:id/delete", to: "api_tokens.destroy"
+
       # Spaces
       get "/spaces",                    to: "spaces.index"
       get "/spaces/:id",                to: "spaces.show"
