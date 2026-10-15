@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 let formData: Record<string, unknown>
 let formErrors: Record<string, string>
@@ -31,6 +31,10 @@ beforeEach(() => {
   formErrors = {}
   setData.mockClear()
   post.mockClear()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('ApiTokens/New', () => {
@@ -71,5 +75,23 @@ describe('ApiTokens/New', () => {
     render(<New minted={{ name: 'ci box', secret: 'sat_abc123' }} />)
     expect(screen.queryByText('Name')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Create token' })).toBeNull()
+  })
+
+  it('copies the minted secret to the clipboard (BarMenu idiom)', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    render(<New minted={{ name: 'ci box', secret: 'sat_abc123' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy secret' }))
+    expect(writeText).toHaveBeenCalledWith('sat_abc123')
+  })
+
+  it('copy failure stays quiet instead of throwing into the click handler', () => {
+    Object.defineProperty(window.navigator, 'clipboard', { value: undefined, configurable: true })
+
+    render(<New minted={{ name: 'ci box', secret: 'sat_abc123' }} />)
+    expect(() =>
+      fireEvent.click(screen.getByRole('button', { name: 'Copy secret' })),
+    ).not.toThrow()
   })
 })

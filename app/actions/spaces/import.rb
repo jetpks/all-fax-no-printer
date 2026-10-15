@@ -18,12 +18,15 @@ module Space
         #   success: 200 {id:, slug:, iterations:, artifacts:, runs:}
         #   guards:  body over 64MB → 413; tar entry with an absolute path,
         #            a ".." component, or a non-file/dir type (symlinks,
-        #            links, devices) → 400 with nothing extracted; invalid
-        #            gzip/tar → 400; extracted root missing space.yaml → 400
+        #            links, devices) → 400 with nothing extracted; GNU L
+        #            long names resolved and guarded, K tolerated; total
+        #            extracted bytes capped at 256MB; invalid gzip/tar → 400;
+        #            extracted root missing space.yaml → 400
         #
         # Re-pushes are idempotent — SpaceImporter upserts by slug and by
         # artifact path. The bundle is extracted into a fresh tmpdir and
-        # removed after import; nothing lands anywhere persistent.
+        # removed after import; the space persists the "pushed" source marker,
+        # never the ephemeral tmpdir path.
         class Import < Space::Server::Action
           # Frozen contract: 413 above this. Checked against the declared
           # Content-Length first, then enforced while streaming rack.input.
@@ -65,7 +68,7 @@ module Space
               id:         space.id,
               slug:       space.slug,
               iterations: iterations_repo.count_for_space(space.id),
-              artifacts:  artifacts_repo.for_space(space.id).size,
+              artifacts:  artifacts_repo.count_for_space(space.id),
               runs:       runs_repo.count_for_space(space.id)
             })
           end
@@ -102,7 +105,7 @@ module Space
                 raise BundleError, "Bundle is missing space.yaml."
               end
 
-              importer.import!(root, user: user)
+              importer.import!(root, user: user, pushed: true)
             end
           end
 
@@ -130,33 +133,53 @@ module Space
           # escape its directory: absolute paths and ".." components are
           # rejected, and only regular files and directories are written.
           class Bundle
-            # typeflags this reader accepts: regular file, directory, and the
-            # PAX/global metadata headers (no filesystem effect). Symlinks
-            # ("2"), hardlinks ("1"), devices, fifos — everything else — is
-            # rejected as unsafe.
-            ALLOWED_TYPES = %w[0 \x00 5 x g].freeze
-            SKIP_TYPES    = %w[x g].freeze
+            # typeflags this reader accepts: regular file, directory, the GNU
+            # long-name/long-link modifiers ("L"/"K"), and the PAX/global
+            # metadata headers (no filesystem effect). Symlinks ("2"),
+            # hardlinks ("1"), devices, fifos — everything else — is rejected
+            # as unsafe.
+            ALLOWED_TYPES = %w[0 \x00 5 x g L K].freeze
+            SKIP_TYPES    = %w[x g L K].freeze
+            GNU_LONG_NAME = "L"
+
+            # Frozen cap on total bytes written across all entries. Enforced on
+            # both passes: validate! sums the declared header sizes (nothing
+            # may pass validation that unpacks past the cap) and extract_to
+            # re-checks the bytes actually written.
+            MAX_EXTRACTED_BYTES = 256 * 1024 * 1024
+
+            def self.extracted_bytes_error
+              "Bundle unpacks past #{MAX_EXTRACTED_BYTES} extracted bytes."
+            end
 
             def initialize(tar_bytes)
               @tar = StringIO.new(tar_bytes)
             end
 
             # Header pass: every entry must pass the guards before pass two
-            # may write anything.
+            # may write anything. The extracted-bytes cap is decided here from
+            # the declared sizes, so a bomb never reaches the extract pass.
             def validate!
-              each_entry { |entry| check!(entry) }
+              unpacked = 0
+              each_resolved_entry do |entry, _|
+                unpacked += entry.header.size
+                raise BundleError, self.class.extracted_bytes_error if unpacked > MAX_EXTRACTED_BYTES
+              end
             end
 
             def extract_to(dir)
-              each_entry do |entry|
-                next if SKIP_TYPES.include?(entry.header.typeflag)
-
-                target = File.join(dir, entry.full_name)
+              written = 0
+              each_resolved_entry do |entry, name|
                 if entry.directory?
-                  FileUtils.mkdir_p(target)
-                else
-                  File.binwrite(target, entry.read)
+                  FileUtils.mkdir_p(File.join(dir, name))
+                  next
                 end
+
+                content = entry.read
+                written += content.bytesize
+                raise BundleError, self.class.extracted_bytes_error if written > MAX_EXTRACTED_BYTES
+
+                File.binwrite(File.join(dir, name), content)
               end
             end
 
@@ -169,15 +192,28 @@ module Space
               raise BundleError, "Not a valid tar stream."
             end
 
-            def check!(entry)
-              type = entry.header.typeflag
-              unless ALLOWED_TYPES.include?(type)
-                raise BundleError, "Unsafe tar entry #{entry.full_name.inspect} (type #{type.inspect})"
-              end
-              return if SKIP_TYPES.include?(type)
+            # Walks entries applying the GNU long-name rule: an "L" entry's
+            # content names the NEXT entry (the reader does not resolve it for
+            # us), so every yielded name is the resolved one — and the one the
+            # traversal guard sees. "K" (long-link target) is accepted and
+            # discarded: links are never extracted. The type guard runs here so
+            # both passes reject unsafe entries identically.
+            def each_resolved_entry
+              long_name = nil
+              each_entry do |entry|
+                type = entry.header.typeflag
+                unless ALLOWED_TYPES.include?(type)
+                  raise BundleError, "Unsafe tar entry #{entry.full_name.inspect} (type #{type.inspect})"
+                end
+                long_name = entry.read.unpack1("Z*") if type == GNU_LONG_NAME
+                next if SKIP_TYPES.include?(type)
 
-              name = entry.full_name
-              raise BundleError, "Unsafe tar path #{name.inspect}" unless safe_name?(name)
+                name = long_name || entry.full_name
+                long_name = nil
+                raise BundleError, "Unsafe tar path #{name.inspect}" unless safe_name?(name)
+
+                yield entry, name
+              end
             end
 
             def safe_name?(name)

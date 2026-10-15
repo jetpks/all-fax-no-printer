@@ -9,6 +9,13 @@ type FormData = { name: string }
 
 const INITIAL_DATA: FormData = { name: '' }
 
+// Best-effort clipboard write, mirroring BarMenu's idiom: the copy is a
+// convenience, so a denied permission or an insecure context fails quietly
+// rather than throwing into the click handler.
+function copy(text: string) {
+  void navigator.clipboard?.writeText(text)
+}
+
 type Props = { minted?: MintedApiToken }
 
 export default function New({ minted }: Props) {
@@ -37,6 +44,9 @@ export default function New({ minted }: Props) {
             <Label className="text-xs text-muted-foreground">{minted.name}</Label>
             <p className="mt-1 break-all font-mono text-sm">{minted.secret}</p>
           </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => copy(minted.secret)}>
+            Copy secret
+          </Button>
           <p className="text-sm text-muted-foreground">
             Send it as the bearer token on machine pushes:
             <code className="ml-1 font-mono">{'Authorization: Bearer <secret>'}</code>
