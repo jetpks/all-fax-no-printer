@@ -32,9 +32,15 @@ module Space
       # Imports the space directory, upserting all records. Returns the Space struct.
       # claude_projects_root: base dir for architect session logs (default ~/.claude/projects).
       # opencode_db_path: path to the opencode SQLite DB (default ~/.local/share/opencode/opencode.db).
+      # pushed: mark a bundle pushed over HTTP — the space persists the stable
+      # PUSHED_MARKER instead of the ephemeral extraction tmpdir, so re-pushes
+      # never resurrect a stale path and local session lookups stay inert.
+      PUSHED_MARKER = "pushed"
+
       def import!(space_dir, user:,
+                  pushed:                false,
                   claude_projects_root: File.expand_path("~/.claude/projects"),
-                  opencode_db_path:    File.expand_path("~/.local/share/opencode/opencode.db"))
+                  opencode_db_path:     File.expand_path("~/.local/share/opencode/opencode.db"))
         space_dir = space_dir.to_s
         yaml      = YAML.load_file(File.join(space_dir, "space.yaml"))
 
@@ -43,11 +49,12 @@ module Space
         status = yaml["status"] || yaml.dig("architect", "status")
         repos  = Array(yaml["repos"]).map { |r| r.is_a?(Hash) ? r["full_name"] : r }.compact
 
+        source_path = pushed ? PUSHED_MARKER : space_dir
         head_info = git_commit_info(space_dir, "HEAD")
         space = @spaces_repo.upsert_by_slug(user.id, slug, {
           title:          title,
           status:         status,
-          source_path:    space_dir,
+          source_path:    source_path,
           repos:          repos,
           git_utc_offset: head_info&.last
         })
@@ -109,6 +116,8 @@ module Space
           upsert_artifact(space, iter, "iteration", rel_path, File.read(path))
         end
 
+        import_notes(space_dir, space)
+
         arch_iters.each do |iter_data|
           ordinal = iter_data["ordinal"]
           iter    = iteration_map[ordinal]
@@ -130,6 +139,26 @@ module Space
               upsert_artifact(space, iter, "lane_report", rel, File.read(report_path))
             end
           end
+        end
+      end
+
+      # Narrator notes (notes/*.md) are space-level artifacts. Kind comes from
+      # the filename prefix before the timestamp; anything unclassified is a
+      # plain note. Non-.md files are skipped. Upserts like every other kind.
+      def import_notes(space_dir, space)
+        Dir.glob(File.join(space_dir, "notes", "*.md")).sort.each do |path|
+          filename = File.basename(path)
+          upsert_artifact(space, nil, note_kind(filename), File.join("notes", filename), File.read(path))
+        end
+      end
+
+      def note_kind(filename)
+        case filename
+        when /\Anarrative-/  then "narrative"
+        when /\Aplan-/       then "plan"
+        when /\Abug-report-/ then "bug_report"
+        when /\Areport-/     then "note_report"
+        else "note"
         end
       end
 
@@ -242,6 +271,10 @@ module Space
       end
 
       def import_architect_runs(space, user:, claude_projects_root:)
+        # The source_path may be a stable marker (pushed bundles) or nil — a
+        # nonexistent path can never map to a real project dir.
+        return if space.source_path.nil? || space.source_path.to_s.empty?
+
         project_dir = File.join(claude_projects_root, mangle(space.source_path))
         return unless Dir.exist?(project_dir)
 

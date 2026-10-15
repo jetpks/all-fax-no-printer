@@ -9,6 +9,7 @@ module Space
     module Runs
       class Ingest
         MAXLEN = "10000"
+        NO_EVENTS_ERROR = "Stream contained no recognizable events."
 
         def initialize(redis, persistor: nil, source: nil)
           @redis     = redis
@@ -50,8 +51,17 @@ module Space
           end
 
           xadd(key, { type: :run_complete }) unless terminal_emitted
-          final_status = :complete if !terminal_emitted && parser&.respond_to?(:complete_at_eof?) && parser.complete_at_eof?
-          { events: event_count, status: final_status }
+          if event_count.zero?
+            # Zero recognized events (empty body or nothing any parser claims):
+            # no parser engaged, so there are no EOF semantics to consult — the
+            # run must fail visibly, not be left :live forever (I02 probe-3).
+            final_status = :failed
+          elsif !terminal_emitted && parser&.respond_to?(:complete_at_eof?) && parser.complete_at_eof?
+            final_status = :complete
+          end
+          result = { events: event_count, status: final_status }
+          result[:error] = NO_EVENTS_ERROR if final_status == :failed && event_count.zero?
+          result
         rescue => e
           begin
             xadd(key, { type: :run_complete }) unless terminal_emitted

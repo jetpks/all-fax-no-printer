@@ -1,8 +1,36 @@
-# space-server
+# all-fax-no-printer
 
 A Ruby/Hanami application for exploring and sharing AI chat transcripts. Upload
-a Claude conversation export, browse it with rich markdown and code rendering,
+a chat transcript export, browse it with rich markdown and code rendering,
 annotate individual turns, and share a read-only link with others.
+
+## Lineage
+
+This repo began as a fork of `jetpks/chat_share`, lived on as the `server/`
+subtree of the `jetpks/space-architect` monorepo, and was extracted into this
+standalone repository with `git filter-repo --subdirectory-filter server` —
+git history is preserved. Pre-extraction (monorepo) history and changelog live
+in [jetpks/space-architect](https://github.com/jetpks/space-architect).
+The application itself is still `space-server` internally (`Space::Server`
+modules, `bin/serve`, `space_server_*` database names) — only the repository
+changed.
+
+## Feature areas
+
+- **Conversations, annotations & shares** — uploaded chat transcript browsing
+  (Claude Code, Codex, and Pi importers under `app/importers/`), per-turn
+  annotations, and read-only share links.
+- **Runs** — streaming trace ingest from `architect dispatch` over SSE
+  (`POST /runs` + `POST /runs/:id/ingest` push traces, `/runs/:id/stream`
+  renders them live). Ingest answers `202` with `{id, status, events}` — plus
+  `error` when the stream failed — and a body that parses but yields no
+  recognizable events fails the run visibly instead of leaving it `live`
+  forever.
+- **Spaces** — importing architect-loop space directories (iterations,
+  artifacts, transcripts) for browsing.
+- **Jobs** — the inference-job pipeline (`lib/space/server/jobs/`): sandboxed
+  execution in Apple `container`, streamed raw/display output, artifact
+  capture.
 
 ## Setup
 
@@ -33,7 +61,66 @@ npm run check          # TypeScript type check
 
 ## Ingest Token Auth
 
-Machine pushes (e.g. from the CLI dispatch harness) authenticate via a shared secret:
+Machine pushes (e.g. from the CLI dispatch harness) authenticate with a bearer
+token. Per-user API tokens are the primary path; the shared `INGEST_TOKEN`
+remains as legacy back-compat.
+
+### Per-user API tokens (primary)
+
+Each user mints named tokens at **API tokens** (`/api_tokens` — session sign-in
+required; bearer is for the data API, not this page). Minting takes only a
+name: the server generates the secret (`sat_` + 64 hex chars, from
+`SecureRandom.hex(32)`), shows it **exactly once** in the mint response, and
+persists only its SHA-256 hex digest in `api_tokens.token_hash` (unique index).
+The plaintext is never stored and cannot be recovered — the mint view shows it
+exactly once, with a copy-to-clipboard affordance, so store it then.
+Revocation is soft (`revoked_at` stamp), so mint history stays auditable.
+
+Requests carrying `Authorization: Bearer <token>` authenticate **as the
+token's owner** on the bearer endpoints (`POST /runs`, `POST
+/runs/:id/ingest`, `POST /spaces/import`); ownership and visibility then
+flow per-user with no further configuration. Lookup is a unique-index hit on
+the presented token's SHA-256 digest — never a linear scan or plaintext
+comparison. Every use touches `last_used_at` on the token row. Failed bearer
+attempts warn-log request path and outcome only — never token material.
+
+### POST /spaces/import (bundle ingest)
+
+`POST /spaces/import` is the authenticated HTTP mouth for pushed space
+bundles — the machine counterpart to `rake space:import` on the server host.
+The request body is a gzip'd tar stream (`Content-Type: application/gzip`)
+containing one space directory (`space.yaml`, `architecture/`, `build/`,
+`notes/`). Auth is the same two paths as the run endpoints: a bearer token
+(per-user API token preferred, legacy `INGEST_TOKEN` back-compat) or an
+ordinary session.
+
+On success the bundle is imported through the same `SpaceImporter` the rake
+task uses, and the response is `200` with `{id, slug, iterations, artifacts,
+runs}` — the imported record counts. **Re-pushes are idempotent**: the space
+upserts by slug and artifacts upsert by path, so pushing the same bundle
+again refreshes in place rather than duplicating.
+
+Guards, all enforced before an import can happen:
+
+| Condition                                             | Status |
+|-------------------------------------------------------|--------|
+| Request body over 64MB                                | 413    |
+| Tar entry with an absolute path or a `..` component   | 400    |
+| Tar entry that is a symlink (or any non-file/dir type)| 400    |
+| Invalid gzip or tar stream                            | 400    |
+| Bundle unpacking past 256MB total extracted bytes    | 400    |
+| Extracted bundle missing `space.yaml`                 | 400    |
+
+Every tar entry header is validated before anything is extracted — a single
+unsafe entry means nothing is extracted or imported. Long names carried as
+GNU `L` entries or PAX `path=` records are resolved to their true names
+before the traversal guard runs — a `..` smuggled through either rejects the
+whole bundle, and a legitimate >100-char path imports under its full name.
+Extraction happens into
+a fresh temporary directory that is removed after the import; no bundle
+content is ever written outside it.
+
+### Legacy global INGEST_TOKEN (back-compat)
 
 | Env var             | Description                                      |
 |---------------------|--------------------------------------------------|
@@ -41,15 +128,23 @@ Machine pushes (e.g. from the CLI dispatch harness) authenticate via a shared se
 | `INGEST_USER_ID`    | Integer user ID that ingested runs are owned by (plain config, not a secret) |
 | `INGEST_TOKEN_REF`  | op:// ref `bin/serve` resolves `INGEST_TOKEN` from (default `op://ansible/space-architect-server/ingest-token`) |
 
-When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are authenticated as the configured user and bypass CSRF (machine pushes carry no session cookie). Browser/cookie requests are unaffected and continue to enforce CSRF normally.
+When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are
+authenticated as the configured user and bypass CSRF (machine pushes carry no
+session cookie). Browser/cookie requests are unaffected and continue to
+enforce CSRF normally. Deployed CLI setups configured this way keep working
+unchanged; per-user tokens take precedence when a presented bearer matches
+one.
 
-Production boot (`bin/serve`) resolves `INGEST_TOKEN` from the 1Password ref above on every start, so cold-restarting falcon no longer strands ingest auth on a hand-minted, unrecoverable token. A directly-set `INGEST_TOKEN` in the environment bypasses op resolution entirely and is used as-is (`bin/dev`, `bin/live_proof.rb`, and other dev/test flows that mint their own token).
+Production boot (`bin/serve`) resolves `INGEST_TOKEN` from the 1Password ref
+above on every start, so cold-restarting falcon no longer strands ingest auth
+on a hand-minted, unrecoverable token. A directly-set `INGEST_TOKEN` in the
+environment bypasses op resolution entirely and is used as-is (`bin/dev`,
+`bin/live_proof.rb`, and other dev/test flows that mint their own token).
 
-## Deploy on the studio
+## Deploy
 
-Production runs as a launchd-supervised `deploy/ansible` role on
-`studio.slush.systems` — see `docs/how-to/deploy-on-the-studio.md` for the
-apply runbook and `deploy/ansible/README.md` for the role reference.
+Production runs on `studio.slush.systems` via the `deploy/ansible` role — see
+[docs/how-to/deploy-on-the-studio.md](docs/how-to/deploy-on-the-studio.md).
 
 ## Retention & Cleanup (v1: manual)
 

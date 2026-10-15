@@ -97,12 +97,29 @@ class IngestTest < Minitest::Test
     end
   end
 
-  def test_empty_input_returns_zero_events_without_crash
+  # I02 probe-3: a zero-event stream must fail visibly, not sit :live forever.
+  def test_empty_input_fails_with_zero_events
     run = Factory[:run, user_id: @user.id, status: 0]
     with_redis do |redis|
       result = Space::Server::Runs::Ingest.new(redis).call(run, StringIO.new(""))
       assert_equal 0, result[:events]
-      assert_equal :live, result[:status]
+      assert_equal :failed, result[:status]
+      assert result[:error], "zero-event ingest must carry an explanatory error"
+    end
+  end
+
+  def test_garbage_body_fails_with_zero_events_and_terminal_frame
+    run = Factory[:run, user_id: @user.id, status: 0]
+    with_redis do |redis|
+      key = Space::Server::Runs::StreamKey.for(run.id)
+      redis.del(key)
+      result = Space::Server::Runs::Ingest.new(redis).call(run, StringIO.new("{not json\n{\"type\":\"mystery\"}\n{}\n"))
+      assert_equal 0, result[:events]
+      assert_equal :failed, result[:status]
+      assert result[:error]
+      entries = redis.xrange(key, "-", "+")
+      assert_equal "run_complete", entries.last[1][1],
+        "zero-event stream must still close with the synthetic run_complete"
     end
   end
 

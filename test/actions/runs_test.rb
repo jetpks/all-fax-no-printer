@@ -89,6 +89,7 @@ class RunsActionTest < Minitest::Test
       assert_equal run.id, data["id"]
       assert data["events"] > 0, "Expected events > 0"
       assert_equal "complete", data["status"]
+      refute data.key?("error"), "success must not carry an error key"
     end
   end
 
@@ -110,14 +111,19 @@ class RunsActionTest < Minitest::Test
     assert_equal :complete, updated.status, "run status must be :complete when fixture contains result line"
   end
 
-  def test_ingest_empty_body_returns_202_live_zero_events
+  def test_ingest_empty_body_returns_202_failed_zero_events
     sign_in(@owner)
     run = Factory[:run, user_id: @owner.id, status: 0]
     status, _, body = post("/runs/#{run.id}/ingest")
     assert_equal 202, status
     data = parse_json(body)
     assert_equal 0, data["events"]
-    assert_equal "live", data["status"]
+    # I05: a zero-event stream must fail visibly, not be left :live forever.
+    assert_equal "failed", data["status"]
+    # …and carry the why, not just the verdict (I05 residue, fixed inline).
+    assert_equal "Stream contained no recognizable events.", data["error"]
+    updated = @runs_repo.by_pk(run.id)
+    assert_equal :failed, updated.status, "run status must be failed (3) on zero events"
   end
 
   def test_ingest_minimal_body_streams_run_init_event

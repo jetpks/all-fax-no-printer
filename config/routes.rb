@@ -69,8 +69,19 @@ module Space
       get  "/providers/:id/models",  to: "providers.models"
       get  "/providers/:id/pi_extension", to: "providers.pi_extension"
 
+      # API tokens (per-user machine auth — mint/revoke; session-auth'd UI,
+      # same convention as profiles/providers: POST …/delete for the revoke)
+      get  "/api_tokens",            to: "api_tokens.index"
+      get  "/api_tokens/new",        to: "api_tokens.new"
+      post "/api_tokens",            to: "api_tokens.create"
+      post "/api_tokens/:id/delete", to: "api_tokens.destroy"
+
       # Spaces
       get "/spaces",                    to: "spaces.index"
+      # Bundle ingest (I04): POST /spaces/import. A distinct method from the
+      # GET /spaces/:id routes, and named statically, so it resolves to
+      # spaces.import — never spaces.show with id="import".
+      post "/spaces/import",            to: "spaces.import"
       get "/spaces/:id",                to: "spaces.show"
       get "/spaces/:id/runs/:run_id",                        to: "spaces.run"
       get "/spaces/:id/runs/:run_id/transcript",             to: "spaces.transcript"

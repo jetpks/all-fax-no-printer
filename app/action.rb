@@ -4,6 +4,7 @@
 require "hanami/action"
 require "dry/monads"
 require "json"
+require "digest"
 require "inertia_hanami"
 
 module Space
@@ -11,7 +12,7 @@ module Space
     class Action < Hanami::Action
       include Dry::Monads[:result]
       include InertiaHanami::Action
-      include Space::Server::Deps["repos.users_repo", "settings"]
+      include Space::Server::Deps["repos.users_repo", "repos.api_tokens_repo", "settings"]
 
       private
 
@@ -24,20 +25,53 @@ module Space
         users_repo.by_pk(uid)
       end
 
-      # Bearer-token lookup. Returns a User only when ALL hold:
-      #   - settings.ingest_token is configured and non-empty
-      #   - request carries Authorization: Bearer <t>
-      #   - <t> constant-time-equals the configured token
-      #   - settings.ingest_user_id resolves to a real user
-      # Nil/empty token can NEVER match — guarded explicitly before secure_compare.
+      # Bearer-token lookup, two paths:
+      #   1. Per-user API tokens — the presented bearer is SHA-256 hashed and
+      #      looked up on api_tokens.token_hash (unique index, revoked tokens
+      #      excluded). A hit authenticates as the token's owner.
+      #   2. Legacy global INGEST_TOKEN — byte-for-byte back-compat with the
+      #      deployed CLI path: constant-time compare against settings, run
+      #      attribution to settings.ingest_user_id.
+      # A rejected bearer warns (path + outcome + hash shape only — never token
+      # material) so failed machine pushes are visible in logs.
+      # Nil/empty configured token can NEVER match — guarded explicitly before
+      # secure_compare.
       def token_user(req)
-        token = settings.ingest_token
-        return nil if token.nil? || token.empty?
-
         auth = req.env["HTTP_AUTHORIZATION"].to_s
         return nil unless auth.start_with?("Bearer ")
 
         bearer = auth[7..]
+        user = api_token_user(bearer) || global_token_user(bearer)
+        warn_rejected_bearer(req, bearer) unless user
+        user
+      end
+
+      def authenticated_user(req)
+        current_user(req) || token_user(req)
+      end
+
+      # --- Bearer auth paths (see token_user) --------------------------------
+
+      # Per-user API token. Hash-lookup semantics: the digest either indexes a
+      # row or it doesn't — no linear scan, no plaintext comparison. A hit
+      # touches last_used_at so mint history shows real usage.
+      def api_token_user(bearer)
+        return nil if bearer.nil? || bearer.empty?
+
+        token = api_tokens_repo.find_active_by_hash(Digest::SHA256.hexdigest(bearer))
+        return nil unless token
+
+        api_tokens_repo.touch_last_used(token.id)
+        users_repo.by_pk(token.user_id)
+      end
+
+      # Legacy global INGEST_TOKEN — preserved byte-for-byte as the back-compat
+      # fallback (deployed CLI setups keep working; IngestToken#resolve! has no
+      # callers and hand-set env remains load-bearing).
+      def global_token_user(bearer)
+        token = settings.ingest_token
+        return nil if token.nil? || token.empty?
+
         return nil unless ::Rack::Utils.secure_compare(token, bearer)
 
         uid = settings.ingest_user_id
@@ -46,8 +80,14 @@ module Space
         users_repo.by_pk(uid)
       end
 
-      def authenticated_user(req)
-        current_user(req) || token_user(req)
+      # Failure visibility (I02 silent-401 gap): log path + outcome + a hash
+      # shape only. The bearer's material and anything re-identifying beyond
+      # its digest prefix never enter the log.
+      def warn_rejected_bearer(req, bearer)
+        digest = Digest::SHA256.hexdigest(bearer.to_s)
+        Hanami.logger.warn(
+          "bearer auth rejected path=#{req.path} outcome=no_matching_token hash_prefix=#{digest[0, 12]}…"
+        )
       end
 
       def render_json(res, data, status: 200)

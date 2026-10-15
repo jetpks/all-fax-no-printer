@@ -40,8 +40,8 @@ class SpaceImporterTest < Minitest::Test
     )
   end
 
-  def import!(claude_projects_root: nil, opencode_db_path: ABSENT_OPENCODE_DB)
-    opts = { user: @user, opencode_db_path: opencode_db_path }
+  def import!(claude_projects_root: nil, opencode_db_path: ABSENT_OPENCODE_DB, pushed: false)
+    opts = { user: @user, opencode_db_path: opencode_db_path, pushed: pushed }
     opts[:claude_projects_root] = claude_projects_root if claude_projects_root
     @importer.import!(FIXTURE_DIR, **opts)
   end
@@ -122,7 +122,83 @@ class SpaceImporterTest < Minitest::Test
     assert_equal iter_row[:id], artifact[:iteration_id]
   end
 
-  # ── Builder Runs ─────────────────────────────────────────────────────────────
+  # ── Narrator notes ───────────────────────────────────────────────────────────
+
+  # Stages a minimal notes-only space (no runs) and imports it. Returns nothing;
+  # assertions run against conn.
+  def import_with_notes(files)
+    Dir.mktmpdir("notes_space") do |dir|
+      yaml = {
+        "id" => "notes-space", "title" => "Notes Space", "status" => "active",
+        "architect" => { "status" => "active", "iterations" => [] }
+      }
+      File.write(File.join(dir, "space.yaml"), YAML.dump(yaml))
+      FileUtils.mkdir_p(File.join(dir, "notes"))
+      files.each { |name, body| File.write(File.join(dir, "notes", name), body) }
+      @importer.import!(dir, user: @user, opencode_db_path: ABSENT_OPENCODE_DB)
+    end
+  end
+
+  def test_imports_narrator_notes_with_kinds_from_filename_prefix
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative\n\nbody\n",
+      "plan-20261014-0105.md"      => "# Plan\n\nbody\n",
+      "bug-report-20261014-0110.md" => "# Bug\n\nbody\n",
+      "report-20261014-0115.md"    => "# Report\n\nbody\n",
+      "unknown-topic-20261014.md"  => "# Unknown\n\nbody\n"
+    })
+
+    kinds = conn[:artifacts]
+      .where(Sequel.like(:path, "notes/%"))
+      .select_hash(:path, :kind)
+    assert_equal({
+      "notes/narrative-20261014-0100.md" => "narrative",
+      "notes/plan-20261014-0105.md"      => "plan",
+      "notes/bug-report-20261014-0110.md" => "bug_report",
+      "notes/report-20261014-0115.md"    => "note_report",
+      "notes/unknown-topic-20261014.md"  => "note"
+    }, kinds)
+  end
+
+  def test_narrator_notes_are_space_level_artifacts_with_titles
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative Notes\n\nbody\n"
+    })
+
+    note = conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").first
+    assert_nil note[:iteration_id]
+    assert_equal "Narrative Notes", note[:title]
+  end
+
+  def test_non_md_note_files_are_skipped
+    import_with_notes({
+      "STATUS.md"   => "# Status\n",
+      "data.json"   => "{}\n",
+      "run.log"     => "noise\n"
+    })
+
+    paths = conn[:artifacts].select_map(:path)
+    assert_includes  paths, "notes/STATUS.md"
+    refute_includes  paths, "notes/data.json"
+    refute_includes  paths, "notes/run.log"
+  end
+
+  def test_notes_upsert_idempotent_on_reimport
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative\n\nfirst\n"
+    })
+    assert_equal 1, conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").count
+
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative\n\nrefreshed\n"
+    })
+
+    note = conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").first
+    assert_equal 1, conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").count
+    assert_match "refreshed", note[:raw]
+  end
+
+  # ── Builder Runs ──────────────────────────────────────────────────────────────
 
   def test_imports_one_builder_run
     import!
@@ -197,6 +273,44 @@ class SpaceImporterTest < Minitest::Test
 
     assert_equal msg_count, new_msg_count,
       "message count must be identical after reimport"
+  end
+
+  # ── source_path: pushed marker vs real path ─────────────────────────────────
+
+  def test_pushed_import_persists_the_pushed_marker
+    space = import!(pushed: true)
+    assert_equal "pushed", space.source_path
+  end
+
+  def test_pushed_import_persists_no_tmpdir_path
+    Dir.mktmpdir("pushed_space") do |dir|
+      FileUtils.cp(File.join(FIXTURE_DIR, "space.yaml"), File.join(dir, "space.yaml"))
+      @importer.import!(dir, user: @user, pushed: true, opencode_db_path: ABSENT_OPENCODE_DB)
+      row = conn[:spaces].first
+      refute_equal dir, row[:source_path], "no ephemeral path may persist"
+      assert_equal "pushed", row[:source_path]
+    end
+  end
+
+  def test_rake_style_import_keeps_the_real_source_path
+    space = import!
+    assert_equal FIXTURE_DIR, space.source_path
+  end
+
+  def test_repush_overwrites_any_stale_source_path_with_the_marker
+    import!
+    space = import!(pushed: true)
+    assert_equal "pushed", space.source_path, "re-push must not resurrect a stale tmpdir path"
+  end
+
+  def test_pushed_import_skips_local_session_lookups_without_error
+    with_staged_session_root do |root|
+      # The staged root matches FIXTURE_DIR's mangled name, but a pushed import
+      # persists the marker — the staged sessions must NOT be claimed.
+      space = import!(pushed: true, claude_projects_root: root)
+      assert_equal 0, conn[:runs].where(role: "architect").count
+      assert_equal "pushed", space.source_path
+    end
   end
 
   # ── Mangle ───────────────────────────────────────────────────────────────────

@@ -246,6 +246,23 @@ export type Profile = {
   spec: ProfileSpec
 }
 
+// A per-user machine-auth credential (minted at /api_tokens/new). The
+// plaintext secret exists only in the mint response — the server persists its
+// SHA-256 hash and never shows it again.
+export type ApiToken = {
+  id: number
+  name: string
+  created_at: string
+  last_used_at: string | null
+  revoked_at: string | null
+}
+
+// The once-only mint response: the secret as presented to the owner.
+export type MintedApiToken = {
+  name: string
+  secret: string
+}
+
 // An inference backend jobs and profiles can target. flavors names the wire
 // protocols it speaks (see lib/providers REQUIRED_FLAVOR).
 export type Provider = {

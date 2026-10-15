@@ -12,6 +12,10 @@ module Space
           artifacts.where(space_id: space_id).to_a
         end
 
+        def count_for_space(space_id)
+          artifacts.dataset.where(space_id: space_id).count
+        end
+
         # Find-or-create with update on match. Returns the upserted Artifact struct.
         def upsert_by_path(space_id, path, attrs)
           existing = artifacts.where(space_id: space_id, path: path).to_a.first
