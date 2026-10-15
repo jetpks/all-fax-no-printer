@@ -35,19 +35,20 @@ module Space
       end
 
       # Prevents Hanami::Router#_params (hanami-router 2.3.1 lib/hanami/router.rb:991-993)
-      # from draining rack.input before the ingest action reads it. _params does
-      # rewind→read→rewind on rack.input when ROUTER_PARSED_BODY is absent;
-      # Protocol::Rack::Input#rewind is a no-op on the one-shot Fixed body, so the
-      # body is consumed and the action's input.gets returns nil → 0 events.
-      # Setting ROUTER_PARSED_BODY here short-circuits _params for this route only,
-      # leaving rack.input untouched for incremental streaming XADD.
+      # from draining rack.input before the raw-body ingest actions read it.
+      # _params does rewind→read→rewind on rack.input when ROUTER_PARSED_BODY is
+      # absent — fatal twice over for a binary body: rack.input is consumed
+      # before the action reads it, and the drained bytes become router params,
+      # whose to_sym raises EncodingError on invalid-UTF-8 gzip/tar bytes.
+      # Setting ROUTER_PARSED_BODY here short-circuits _params for these routes
+      # only, leaving rack.input untouched for incremental reads/streaming.
       IngestBodyPassthrough = Class.new do
-        INGEST_ROUTE = %r{\A/runs/\d+/ingest\z}
+        RAW_BODY_ROUTES = %r{\A/runs/\d+/ingest\z|\A/spaces/import\z}
 
         def initialize(app) = @app = app
 
         def call(env)
-          if env["REQUEST_METHOD"] == "POST" && INGEST_ROUTE.match?(env["PATH_INFO"])
+          if env["REQUEST_METHOD"] == "POST" && RAW_BODY_ROUTES.match?(env["PATH_INFO"])
             env[Hanami::Router::ROUTER_PARSED_BODY] ||= {}
           end
           @app.call(env)

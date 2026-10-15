@@ -74,11 +74,42 @@ Revocation is soft (`revoked_at` stamp), so mint history stays auditable.
 
 Requests carrying `Authorization: Bearer <token>` authenticate **as the
 token's owner** on the bearer endpoints (`POST /runs`, `POST
-/runs/:id/ingest`); ownership and visibility then flow per-user with no
-further configuration. Lookup is a unique-index hit on the presented token's
-SHA-256 digest — never a linear scan or plaintext comparison. Every use
-touches `last_used_at` on the token row. Failed bearer attempts warn-log
-request path and outcome only — never token material.
+/runs/:id/ingest`, `POST /spaces/import`); ownership and visibility then
+flow per-user with no further configuration. Lookup is a unique-index hit on
+the presented token's SHA-256 digest — never a linear scan or plaintext
+comparison. Every use touches `last_used_at` on the token row. Failed bearer
+attempts warn-log request path and outcome only — never token material.
+
+### POST /spaces/import (bundle ingest)
+
+`POST /spaces/import` is the authenticated HTTP mouth for pushed space
+bundles — the machine counterpart to `rake space:import` on the server host.
+The request body is a gzip'd tar stream (`Content-Type: application/gzip`)
+containing one space directory (`space.yaml`, `architecture/`, `build/`,
+`notes/`). Auth is the same two paths as the run endpoints: a bearer token
+(per-user API token preferred, legacy `INGEST_TOKEN` back-compat) or an
+ordinary session.
+
+On success the bundle is imported through the same `SpaceImporter` the rake
+task uses, and the response is `200` with `{id, slug, iterations, artifacts,
+runs}` — the imported record counts. **Re-pushes are idempotent**: the space
+upserts by slug and artifacts upsert by path, so pushing the same bundle
+again refreshes in place rather than duplicating.
+
+Guards, all enforced before an import can happen:
+
+| Condition                                             | Status |
+|-------------------------------------------------------|--------|
+| Request body over 64MB                                | 413    |
+| Tar entry with an absolute path or a `..` component   | 400    |
+| Tar entry that is a symlink (or any non-file/dir type)| 400    |
+| Invalid gzip or tar stream                            | 400    |
+| Extracted bundle missing `space.yaml`                 | 400    |
+
+Every tar entry header is validated before anything is extracted — a single
+unsafe entry means nothing is extracted or imported. Extraction happens into
+a fresh temporary directory that is removed after the import; no bundle
+content is ever written outside it.
 
 ### Legacy global INGEST_TOKEN (back-compat)
 

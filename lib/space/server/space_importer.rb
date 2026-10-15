@@ -109,6 +109,8 @@ module Space
           upsert_artifact(space, iter, "iteration", rel_path, File.read(path))
         end
 
+        import_notes(space_dir, space)
+
         arch_iters.each do |iter_data|
           ordinal = iter_data["ordinal"]
           iter    = iteration_map[ordinal]
@@ -130,6 +132,26 @@ module Space
               upsert_artifact(space, iter, "lane_report", rel, File.read(report_path))
             end
           end
+        end
+      end
+
+      # Narrator notes (notes/*.md) are space-level artifacts. Kind comes from
+      # the filename prefix before the timestamp; anything unclassified is a
+      # plain note. Non-.md files are skipped. Upserts like every other kind.
+      def import_notes(space_dir, space)
+        Dir.glob(File.join(space_dir, "notes", "*.md")).sort.each do |path|
+          filename = File.basename(path)
+          upsert_artifact(space, nil, note_kind(filename), File.join("notes", filename), File.read(path))
+        end
+      end
+
+      def note_kind(filename)
+        case filename
+        when /\Anarrative-/  then "narrative"
+        when /\Aplan-/       then "plan"
+        when /\Abug-report-/ then "bug_report"
+        when /\Areport-/     then "note_report"
+        else "note"
         end
       end
 
