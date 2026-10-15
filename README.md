@@ -1,8 +1,33 @@
-# space-server
+# all-fax-no-printer
 
 A Ruby/Hanami application for exploring and sharing AI chat transcripts. Upload
-a Claude conversation export, browse it with rich markdown and code rendering,
+a chat transcript export, browse it with rich markdown and code rendering,
 annotate individual turns, and share a read-only link with others.
+
+## Lineage
+
+This repo began as a fork of `jetpks/chat_share`, lived on as the `server/`
+subtree of the `jetpks/space-architect` monorepo, and was extracted into this
+standalone repository with `git filter-repo --subdirectory-filter server` —
+git history is preserved. Pre-extraction (monorepo) history and changelog live
+in [jetpks/space-architect](https://github.com/jetpks/space-architect).
+The application itself is still `space-server` internally (`Space::Server`
+modules, `bin/serve`, `space_server_*` database names) — only the repository
+changed.
+
+## Feature areas
+
+- **Conversations, annotations & shares** — uploaded chat transcript browsing
+  (Claude Code, Codex, and Pi importers under `app/importers/`), per-turn
+  annotations, and read-only share links.
+- **Runs** — streaming trace ingest from `architect dispatch` over SSE
+  (`POST /runs` + `POST /runs/:id/ingest` push traces, `/runs/:id/stream`
+  renders them live).
+- **Spaces** — importing architect-loop space directories (iterations,
+  artifacts, transcripts) for browsing.
+- **Jobs** — the inference-job pipeline (`lib/space/server/jobs/`): sandboxed
+  execution in Apple `container`, streamed raw/display output, artifact
+  capture.
 
 ## Setup
 
@@ -45,11 +70,10 @@ When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are 
 
 Production boot (`bin/serve`) resolves `INGEST_TOKEN` from the 1Password ref above on every start, so cold-restarting falcon no longer strands ingest auth on a hand-minted, unrecoverable token. A directly-set `INGEST_TOKEN` in the environment bypasses op resolution entirely and is used as-is (`bin/dev`, `bin/live_proof.rb`, and other dev/test flows that mint their own token).
 
-## Deploy on the studio
+## Deploy
 
-Production runs as a launchd-supervised `deploy/ansible` role on
-`studio.slush.systems` — see `docs/how-to/deploy-on-the-studio.md` for the
-apply runbook and `deploy/ansible/README.md` for the role reference.
+Production runs on `studio.slush.systems` via the `deploy/ansible` role — see
+[docs/how-to/deploy-on-the-studio.md](docs/how-to/deploy-on-the-studio.md).
 
 ## Retention & Cleanup (v1: manual)
 
