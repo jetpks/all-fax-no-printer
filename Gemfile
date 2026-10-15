@@ -36,7 +36,7 @@ gem "shrine", "3.8.0"
 gem "rom", "5.4.3"
 gem "rom-sql", "3.7.0"
 gem "sequel", "5.105.0"
-gem "pg", "1.6.3"
+gem "pg", "1.7.0"
 
 # dry-rb suite
 gem "dry-types", "1.9.1"
