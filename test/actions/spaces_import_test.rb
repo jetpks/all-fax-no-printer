@@ -94,6 +94,45 @@ class SpacesImportTest < Minitest::Test
     end
   end
 
+  # Hand-built ustar headers for the GNU entries Gem::Package::TarWriter cannot
+  # emit ("L" long names — split_name raises instead) — deterministic and
+  # in-process, with no bsdtar AppleDouble noise. size may exceed the body to
+  # model a bomb's declared expansion; the reader tolerates the short final
+  # body without reading it, which is exactly what the validate pass must cap.
+  def tar_bytes(entries)
+    out = +"".b
+    entries.each do |(name, opts)|
+      body     = opts.fetch(:body, "").to_s.b
+      typeflag = opts.fetch(:typeflag, "0")
+      out << ustar_header(name, opts.fetch(:size, body.bytesize), typeflag)
+      out << body
+      out << "\x00" * ((512 - (body.bytesize % 512)) % 512)
+    end
+    out << "\x00" * 512
+  end
+
+  def ustar_header(name, size, typeflag)
+    header = +"".b
+    header << name.to_s.b.ljust(100, "\x00")
+    header << "0000644\x00"
+    header << "0000000\x00" # uid
+    header << "0000000\x00" # gid
+    header << format("%011o", size) << "\x00"
+    header << "00000000000\x00" # mtime
+    header << "        " # checksum placeholder — summed as spaces
+    header << typeflag
+    header << "\x00" * 100 # linkname
+    header << "ustar\x0000"
+    header << "\x00" * 64  # uname + gname (32 + 32)
+    header << "\x00" * 16  # devmajor + devminor
+    header << "\x00" * 155 # prefix
+    header << "\x00" * 12  # padding
+    raise "bad header length" unless header.bytesize == 512
+
+    header[148, 8] = format("%06o", header.bytes.sum) + "\x00 "
+    header
+  end
+
   # ── happy paths ─────────────────────────────────────────────────────────────
 
   def test_bearer_happy_path_imports_space
@@ -250,5 +289,93 @@ class SpacesImportTest < Minitest::Test
     assert_equal 400, status
     assert_match(/space\.yaml/, parse_json(body)["error"])
     assert_equal 0, conn[:spaces].count
+  end
+
+  # ── GNU L/K entries and the extracted-bytes cap ──────────────────────────
+
+  def long_note_name = "notes/#{"n" * 140}.md" # 146-char path, unrepresentable in ustar name+
+
+  def test_long_name_via_gnu_l_entry_imports_cleanly
+    secret = mint_token
+    status, _, body = post_raw(
+      "/spaces/import",
+      body: gzip(tar_bytes([
+        ["space.yaml", body: <<~YAML],
+          id: pushed-longname
+          title: Pushed Longname
+          status: active
+          architect:
+            status: active
+            iterations: []
+        YAML
+        ["notes", typeflag: "5"],
+        ["././@LongLink", body: "#{long_note_name}\x00", typeflag: "L"],
+        [long_note_name[0, 99], body: "# Long note\n"]
+      ])),
+      content_type: "application/gzip",
+      bearer: secret
+    )
+
+    assert_equal 200, status, "long path via L must import (got #{parse_json(body)['error']})"
+    note = conn[:artifacts].where(space_id: parse_json(body)["id"], kind: "note").first
+    refute_nil note, "the long-named note must be imported"
+    assert_equal long_note_name, note[:path], "the resolved (not truncated) name must be stored"
+    assert_operator note[:path].length, :>, 100
+  end
+
+  def test_traversal_long_name_via_gnu_l_entry_rejected_with_400_and_nothing_imported
+    secret = mint_token
+    cwd_files = Dir.children(Dir.pwd)
+
+    status, _, body = post_raw(
+      "/spaces/import",
+      body: gzip(tar_bytes([
+        ["space.yaml", body: "id: evil-long\n"],
+        ["././@LongLink", body: "../../../../etc/evil\x00", typeflag: "L"],
+        ["trunc", body: "pwned"]
+      ])),
+      content_type: "application/gzip",
+      bearer: secret
+    )
+
+    assert_equal 400, status
+    assert_match(/Unsafe tar path/, parse_json(body)["error"])
+    assert_equal 0, conn[:spaces].count, "nothing may be imported"
+    assert_equal cwd_files, Dir.children(Dir.pwd), "no file may escape the extraction dir"
+  end
+
+  def test_gnu_k_entry_is_tolerated
+    secret = mint_token
+    status, _, body = post_raw(
+      "/spaces/import",
+      body: gzip(tar_bytes([
+        ["space.yaml", body: "id: pushed-klink\n"],
+        ["././@LongLink", body: "somewhere/else\x00", typeflag: "K"],
+        ["README.md", body: "# fine\n"]
+      ])),
+      content_type: "application/gzip",
+      bearer: secret
+    )
+
+    assert_equal 200, status, "a K entry alone must not fail the bundle"
+    assert_equal "pushed-klink", parse_json(body)["slug"]
+  end
+
+  def test_bundle_declaring_expansion_past_the_cap_rejected_with_400_and_nothing_imported
+    secret = mint_token
+    status, _, body = post_raw(
+      "/spaces/import",
+      body: gzip(tar_bytes([
+        ["space.yaml", body: "id: pushed-bomb\n"],
+        ["bomb.bin", size: 256 * 1024 * 1024 + 1]
+      ])),
+      content_type: "application/gzip",
+      bearer: secret
+    )
+
+    assert_equal 400, status
+    assert_match(/256|unpacks/, parse_json(body)["error"])
+    assert_equal 0, conn[:spaces].count, "nothing may be imported"
+    assert_equal 0, conn[:artifacts].count, "no partial import"
   end
 end

@@ -11,7 +11,7 @@ class ReposTest < Minitest::Test
   def setup
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :users].each do |t|
+    [:annotations, :conversation_shares, :messages, :conversations, :artifacts, :spaces, :users].each do |t|
       conn[t].delete
     end
   end
@@ -310,5 +310,21 @@ class ReposTest < Minitest::Test
     struct = Factory.structs[:user]
     assert_respond_to struct, :username
     assert_nil users_repo.by_github_uid(struct.github_uid)
+  end
+
+  # --- ArtifactsRepo#count_for_space (mirrors iterations/runs siblings) ----
+
+  def artifacts_repo = Space::Server::Repos::ArtifactsRepo.new
+
+  def test_artifacts_count_for_space
+    space = Factory[:space]
+    other = Factory[:space]
+    Factory[:artifact, space_id: space.id]
+    Factory[:artifact, space_id: space.id]
+    Factory[:artifact, space_id: other.id]
+
+    assert_equal 2, artifacts_repo.count_for_space(space.id)
+    assert_equal 1, artifacts_repo.count_for_space(other.id)
+    assert_equal 0, artifacts_repo.count_for_space(Factory[:space].id)
   end
 end

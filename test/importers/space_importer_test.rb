@@ -40,8 +40,8 @@ class SpaceImporterTest < Minitest::Test
     )
   end
 
-  def import!(claude_projects_root: nil, opencode_db_path: ABSENT_OPENCODE_DB)
-    opts = { user: @user, opencode_db_path: opencode_db_path }
+  def import!(claude_projects_root: nil, opencode_db_path: ABSENT_OPENCODE_DB, pushed: false)
+    opts = { user: @user, opencode_db_path: opencode_db_path, pushed: pushed }
     opts[:claude_projects_root] = claude_projects_root if claude_projects_root
     @importer.import!(FIXTURE_DIR, **opts)
   end
@@ -273,6 +273,44 @@ class SpaceImporterTest < Minitest::Test
 
     assert_equal msg_count, new_msg_count,
       "message count must be identical after reimport"
+  end
+
+  # ── source_path: pushed marker vs real path ─────────────────────────────────
+
+  def test_pushed_import_persists_the_pushed_marker
+    space = import!(pushed: true)
+    assert_equal "pushed", space.source_path
+  end
+
+  def test_pushed_import_persists_no_tmpdir_path
+    Dir.mktmpdir("pushed_space") do |dir|
+      FileUtils.cp(File.join(FIXTURE_DIR, "space.yaml"), File.join(dir, "space.yaml"))
+      @importer.import!(dir, user: @user, pushed: true, opencode_db_path: ABSENT_OPENCODE_DB)
+      row = conn[:spaces].first
+      refute_equal dir, row[:source_path], "no ephemeral path may persist"
+      assert_equal "pushed", row[:source_path]
+    end
+  end
+
+  def test_rake_style_import_keeps_the_real_source_path
+    space = import!
+    assert_equal FIXTURE_DIR, space.source_path
+  end
+
+  def test_repush_overwrites_any_stale_source_path_with_the_marker
+    import!
+    space = import!(pushed: true)
+    assert_equal "pushed", space.source_path, "re-push must not resurrect a stale tmpdir path"
+  end
+
+  def test_pushed_import_skips_local_session_lookups_without_error
+    with_staged_session_root do |root|
+      # The staged root matches FIXTURE_DIR's mangled name, but a pushed import
+      # persists the marker — the staged sessions must NOT be claimed.
+      space = import!(pushed: true, claude_projects_root: root)
+      assert_equal 0, conn[:runs].where(role: "architect").count
+      assert_equal "pushed", space.source_path
+    end
   end
 
   # ── Mangle ───────────────────────────────────────────────────────────────────
