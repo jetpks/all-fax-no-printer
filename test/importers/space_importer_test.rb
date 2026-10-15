@@ -122,7 +122,83 @@ class SpaceImporterTest < Minitest::Test
     assert_equal iter_row[:id], artifact[:iteration_id]
   end
 
-  # ── Builder Runs ─────────────────────────────────────────────────────────────
+  # ── Narrator notes ───────────────────────────────────────────────────────────
+
+  # Stages a minimal notes-only space (no runs) and imports it. Returns nothing;
+  # assertions run against conn.
+  def import_with_notes(files)
+    Dir.mktmpdir("notes_space") do |dir|
+      yaml = {
+        "id" => "notes-space", "title" => "Notes Space", "status" => "active",
+        "architect" => { "status" => "active", "iterations" => [] }
+      }
+      File.write(File.join(dir, "space.yaml"), YAML.dump(yaml))
+      FileUtils.mkdir_p(File.join(dir, "notes"))
+      files.each { |name, body| File.write(File.join(dir, "notes", name), body) }
+      @importer.import!(dir, user: @user, opencode_db_path: ABSENT_OPENCODE_DB)
+    end
+  end
+
+  def test_imports_narrator_notes_with_kinds_from_filename_prefix
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative\n\nbody\n",
+      "plan-20261014-0105.md"      => "# Plan\n\nbody\n",
+      "bug-report-20261014-0110.md" => "# Bug\n\nbody\n",
+      "report-20261014-0115.md"    => "# Report\n\nbody\n",
+      "unknown-topic-20261014.md"  => "# Unknown\n\nbody\n"
+    })
+
+    kinds = conn[:artifacts]
+      .where(Sequel.like(:path, "notes/%"))
+      .select_hash(:path, :kind)
+    assert_equal({
+      "notes/narrative-20261014-0100.md" => "narrative",
+      "notes/plan-20261014-0105.md"      => "plan",
+      "notes/bug-report-20261014-0110.md" => "bug_report",
+      "notes/report-20261014-0115.md"    => "note_report",
+      "notes/unknown-topic-20261014.md"  => "note"
+    }, kinds)
+  end
+
+  def test_narrator_notes_are_space_level_artifacts_with_titles
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative Notes\n\nbody\n"
+    })
+
+    note = conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").first
+    assert_nil note[:iteration_id]
+    assert_equal "Narrative Notes", note[:title]
+  end
+
+  def test_non_md_note_files_are_skipped
+    import_with_notes({
+      "STATUS.md"   => "# Status\n",
+      "data.json"   => "{}\n",
+      "run.log"     => "noise\n"
+    })
+
+    paths = conn[:artifacts].select_map(:path)
+    assert_includes  paths, "notes/STATUS.md"
+    refute_includes  paths, "notes/data.json"
+    refute_includes  paths, "notes/run.log"
+  end
+
+  def test_notes_upsert_idempotent_on_reimport
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative\n\nfirst\n"
+    })
+    assert_equal 1, conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").count
+
+    import_with_notes({
+      "narrative-20261014-0100.md" => "# Narrative\n\nrefreshed\n"
+    })
+
+    note = conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").first
+    assert_equal 1, conn[:artifacts].where(path: "notes/narrative-20261014-0100.md").count
+    assert_match "refreshed", note[:raw]
+  end
+
+  # ── Builder Runs ──────────────────────────────────────────────────────────────
 
   def test_imports_one_builder_run
     import!

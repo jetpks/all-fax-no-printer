@@ -78,6 +78,10 @@ module Space
 
       # Spaces
       get "/spaces",                    to: "spaces.index"
+      # Bundle ingest (I04): POST /spaces/import. A distinct method from the
+      # GET /spaces/:id routes, and named statically, so it resolves to
+      # spaces.import — never spaces.show with id="import".
+      post "/spaces/import",            to: "spaces.import"
       get "/spaces/:id",                to: "spaces.show"
       get "/spaces/:id/runs/:run_id",                        to: "spaces.run"
       get "/spaces/:id/runs/:run_id/transcript",             to: "spaces.transcript"
