@@ -41,6 +41,10 @@ export default function Nav() {
               </Button>
 
               <Button asChild variant="ghost" size="sm">
+                <Link href="/api_tokens">API Keys</Link>
+              </Button>
+
+              <Button asChild variant="ghost" size="sm">
                 <Link href="/providers">Providers</Link>
               </Button>
 
