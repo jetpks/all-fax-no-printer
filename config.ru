@@ -15,4 +15,12 @@ use Rack::Protection::HostAuthorization,
   permitted_hosts: _settings.permitted_hosts,
   allow_if:        ->(env) { env["PATH_INFO"] == "/up" }
 
+# Static vite assets. Hanami does not serve public/ in production — on the
+# studio deploy Caddy served /vite/* from disk; containerized, the bundles
+# ship inside the image and the app serves them itself. Rack::Static maps
+# the /vite prefix onto public/vite and falls through to the app when no
+# file matches (Rack::Files itself is a standalone app in rack 3.2, not
+# (app, root) middleware).
+use Rack::Static, urls: ["/vite"], root: File.expand_path("public", __dir__)
+
 run Hanami.app
