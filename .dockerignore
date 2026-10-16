@@ -1,0 +1,23 @@
+# build artifacts / deps reinstalled inside the image
+node_modules
+vendor/bundle
+.bundle
+public/vite
+public/vite-dev
+public/vite-test
+
+# never baked
+.env
+.env.*
+config/master.key
+
+# repo machinery irrelevant to runtime
+.git
+.github
+test
+deploy
+docs
+CHANGELOG.md
+README.md
+log/*
+tmp

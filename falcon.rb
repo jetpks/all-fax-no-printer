@@ -15,7 +15,10 @@ require_relative "app/services/consumer_worker_service"
 service "architect.web" do
   include Falcon::Environment::Rack
 
-  endpoint { Async::HTTP::Endpoint.parse("http://localhost:3000") }
+  # FALCON_BIND: container deploys override (podman's PublishPort forwards to
+  # the container's eth0, not its localhost — the image sets 0.0.0.0). Dev/test
+  # default unchanged.
+  endpoint { Async::HTTP::Endpoint.parse(ENV.fetch("FALCON_BIND", "http://localhost:3000")) }
 end
 
 # Import-worker service: a single managed child process that dequeues from Redis
