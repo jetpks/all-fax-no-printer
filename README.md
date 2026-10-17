@@ -21,14 +21,18 @@ The UI leads with spaces: `/` and `/spaces` are the spaces index,
 `/conversations` lists captured sessions across spaces.
 
 - **Spaces** — architect-loop space directories (iterations, artifacts,
-  decisions) browsable at `/spaces/:id`; a space's show page interleaves its
-  iterations with its captured conversations on one timeline. Conversations
-  not filed into a space are grouped by working directory under the index's
-  "Unspaced" section.
+  decisions) browsable at `/spaces/:id`; the show page is the phone observation
+  deck: a bounded-height live log of the whole space on top, the last narrator
+  message beneath it, newest-first conversations with full-row tap targets, and
+  iterations in their own section below. Conversations not filed into a space
+  are grouped by working directory under the index's "Unspaced" section.
 - **Conversations** — every captured agent session lands as a conversation
   (index at `/conversations`, show at `/conversations/:id`, publish toggle,
-  delete). A capture still landing mounts a live view on its show page while
-  its status is `pending` or `live`. The parser is the pi harness stream
+  delete). A capture still landing mounts a LiveLog on its show page — a
+  looplog-style event log of the streaming capture — while its status is
+  `pending` or `live`. The landed body reads as flat prompt/reply pairs per
+  turn: prose as markdown, tool exchanges folded to one-line rows, thinking
+  collapsed, with the turn sidebar as the jump nav. The parser is the pi harness stream
   (`lib/space/server/normalizer/pi.rb`); a body that parses but yields no
   recognizable events fails the conversation visibly instead of leaving it
   `live` forever (pi's first-line classification doesn't claim fails the
@@ -38,7 +42,13 @@ The UI leads with spaces: `/` and `/spaces` are the spaces index,
   live with a 15s heartbeat. Event vocabulary: `session_init` (the capture is
   live), `message_start`, `block_open`, `text_delta`, `tool_args_delta`,
   `block_close`, `message_complete`, `tool_result`, and the terminal
-  `conversation_complete` (the client closes the stream on it).
+  `conversation_complete` (the client closes the stream on it). The space
+  observation deck lives at `GET /spaces/:id/stream`: it muxes the space's
+  conversations' streams into one long-lived feed whose events carry
+  conversation identity (`conversation_id`/`agent_role`/`agent_name`/`tag`),
+  supports `Last-Event-ID` replay, pings a 15s heartbeat, and never ends on
+  `conversation_complete` (an ordinary event there — the stream closes only on
+  client disconnect).
 
 ## Setup
 

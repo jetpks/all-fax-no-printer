@@ -380,3 +380,110 @@ class SpacesShowI03Test < Minitest::Test
     assert props.key?("conversations"), "conversations feed replaces the run arrays"
   end
 end
+
+# I12 phone observation deck: the narrator prop on the space show page — the
+# newest narrator conversation (for_space is already desc(:updated_at)) reduced
+# to its last qualifying assistant message's text.
+class SpacesShowNarratorTest < Minitest::Test
+  include ActionTestHelper
+
+  def setup
+    setup_db
+    OmniAuth.config.test_mode = true
+    @owner = Factory[:user, github_uid: "i12-narrator-owner", username: "i12_narrator_owner"]
+  end
+
+  def teardown
+    OmniAuth.config.mock_auth[:github] = :csrf_detected
+  end
+
+  def narrator_prop(space_id)
+    props = nil
+    _, _, body = inertia_get("/spaces/#{space_id}")
+    props = parse_json(body)["props"]
+    props
+  end
+
+  def test_show_narrator_present_with_last_assistant_text
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "narrator-space"]
+    conv  = Factory[:conversation, user_id: @owner.id, space_id: space.id,
+                    agent_role: "narrator", updated_at: Time.now]
+    Factory[:message, conversation_id: conv.id, role: "user", position: 1,
+            content: [{ "type" => "text", "text" => "user chatter" }]]
+    Factory[:message, conversation_id: conv.id, role: "assistant", position: 2,
+            content: [{ "type" => "text", "text" => "part one" },
+                      { "type" => "thinking", "thinking" => "hmm" },
+                      { "type" => "text", "text" => "part two" }]]
+    # A later user message must not displace the last qualifying assistant message.
+    Factory[:message, conversation_id: conv.id, role: "user", position: 3,
+            content: [{ "type" => "text", "text" => "later user text" }]]
+
+    props = narrator_prop(space.id)
+    assert props.key?("narrator"), "narrator key must always be present"
+    narrator = props["narrator"]
+    assert_equal conv.id, narrator["conversation_id"]
+    assert_equal "part one\n\npart two", narrator["text"],
+      "the message's text blocks join with blank lines"
+    assert narrator.key?("updated_at")
+    assert Time.iso8601(narrator["updated_at"])
+  end
+
+  def test_show_narrator_last_qualifying_assistant_message_wins
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "narrator-last-space"]
+    conv  = Factory[:conversation, user_id: @owner.id, space_id: space.id,
+                    agent_role: "narrator", updated_at: Time.now]
+    Factory[:message, conversation_id: conv.id, role: "assistant", position: 1,
+            content: [{ "type" => "text", "text" => "earlier text" }]]
+    Factory[:message, conversation_id: conv.id, role: "assistant", position: 2,
+            content: [{ "type" => "text", "text" => "later text" }]]
+
+    props = narrator_prop(space.id)
+    assert_equal "later text", props["narrator"]["text"]
+  end
+
+  def test_show_narrator_newest_narrator_conversation_wins
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "narrator-newest-space"]
+    older = Factory[:conversation, user_id: @owner.id, space_id: space.id,
+                    agent_role: "narrator", updated_at: Time.now - 3600]
+    newer = Factory[:conversation, user_id: @owner.id, space_id: space.id,
+                    agent_role: "narrator", updated_at: Time.now]
+    Factory[:message, conversation_id: older.id, role: "assistant", position: 1,
+            content: [{ "type" => "text", "text" => "older narrator text" }]]
+    Factory[:message, conversation_id: newer.id, role: "assistant", position: 1,
+            content: [{ "type" => "text", "text" => "newer narrator text" }]]
+
+    props = narrator_prop(space.id)
+    assert_equal newer.id, props["narrator"]["conversation_id"],
+      "for_space is desc(:updated_at) — the first match is the newest"
+    assert_equal "newer narrator text", props["narrator"]["text"]
+  end
+
+  def test_show_narrator_nil_without_narrator_conversation
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "narrator-absent-space"]
+    Factory[:conversation, user_id: @owner.id, space_id: space.id, agent_role: "builder"]
+
+    props = narrator_prop(space.id)
+    assert props.key?("narrator"), "narrator key must always be present"
+    assert_nil props["narrator"]
+  end
+
+  def test_show_narrator_nil_without_qualifying_assistant_text
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "narrator-no-text-space"]
+    conv  = Factory[:conversation, user_id: @owner.id, space_id: space.id,
+                    agent_role: "narrator", updated_at: Time.now]
+    # Assistant messages with only empty-text blocks don't qualify.
+    Factory[:message, conversation_id: conv.id, role: "assistant", position: 1,
+            content: [{ "type" => "text", "text" => "" }]]
+    Factory[:message, conversation_id: conv.id, role: "user", position: 2,
+            content: [{ "type" => "text", "text" => "only user text" }]]
+
+    props = narrator_prop(space.id)
+    assert props.key?("narrator")
+    assert_nil props["narrator"]
+  end
+end

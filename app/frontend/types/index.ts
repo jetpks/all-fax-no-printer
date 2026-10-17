@@ -198,6 +198,14 @@ export type SpaceConversation = {
   updated_at: string
 }
 
+// The last qualifying narrator message for a space (server-derived; the show
+// action adds this prop). null → no narrator conversation or no qualifying text.
+export type SpaceNarrator = {
+  conversation_id: number
+  text: string
+  updated_at: string
+}
+
 export type SpaceArtifact = {
   id: number
   kind: string
@@ -225,6 +233,10 @@ export type SpaceIteration = {
   decisions?: { name: string; body: string }[]
   artifacts: SpaceArtifact[]
 }
+
+// An SSE event payload parsed from the `data:` field of a server-sent event.
+// The `type` field determines how it is handled; all other fields are event-specific.
+export type SSEEvent = { type: string; [key: string]: unknown }
 
 export type Space = {
   id: number

@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { SpaceArtifact, SpaceConversation, SpaceIteration } from '@/types'
+import type { SpaceArtifact, SpaceConversation, SpaceIteration, SpaceNarrator } from '@/types'
 
 vi.mock('@inertiajs/react', () => ({
-  Link: ({ href, children }: { href: string; children?: ReactNode }) => (
-    <a href={href}>{children}</a>
+  // Forward extra props (data-testid, className) so full-row anchors can be queried.
+  Link: ({ href, children, ...rest }: { href: string; children?: ReactNode } & Record<string, unknown>) => (
+    <a href={href} {...rest}>{children}</a>
   ),
   Head: (_props: { title?: string }) => null,
 }))
@@ -13,6 +14,25 @@ vi.mock('@inertiajs/react', () => ({
 vi.mock('@/layouts/AppLayout', () => ({
   default: ({ children }: { children?: ReactNode }) => <div data-testid="layout">{children}</div>,
 }))
+
+// LiveLog opens a real EventSource on mount — stub it (same stub pattern as
+// the other page tests) so the page renders offline.
+class MockEventSource {
+  static instances: MockEventSource[] = []
+  url: string
+  closed = false
+  onmessage: ((e: MessageEvent) => void) | null = null
+  onerror: (() => void) | null = null
+
+  constructor(url: string) {
+    this.url = url
+    MockEventSource.instances.push(this)
+  }
+
+  close() {
+    this.closed = true
+  }
+}
 
 import Show from './Show'
 
@@ -59,15 +79,113 @@ const OTHER_ARTIFACT: SpaceArtifact = {
   title: 'BRIEF',
 }
 
+const NARRATOR: SpaceNarrator = {
+  conversation_id: 42,
+  text: 'The deck now renders a live log.',
+  updated_at: '2026-06-03T00:00:00Z',
+}
+
 const DEFAULT_PROPS = {
   space: SPACE,
   iterations: [ITERATION_2, ITERATION_1], // deliberately out of ordinal order
   conversations: [] as SpaceConversation[],
   other_artifacts: [] as SpaceArtifact[],
+  narrator: null as SpaceNarrator | null,
 }
 
 describe('Spaces/Show', () => {
-  it('renders iterations in ascending ordinal order (oldest first)', () => {
+  beforeEach(() => {
+    MockEventSource.instances = []
+    vi.stubGlobal('EventSource', MockEventSource)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('mounts the live log on the space stream URL', () => {
+    render(<Show {...DEFAULT_PROPS} />)
+    expect(MockEventSource.instances).toHaveLength(1)
+    expect(MockEventSource.instances[0].url).toBe('/spaces/1/stream')
+  })
+
+  it('renders top-to-bottom: live log, narrator, conversation rows, iterations', () => {
+    const { container } = render(
+      <Show {...DEFAULT_PROPS} conversations={[CONVERSATION]} narrator={NARRATOR} />,
+    )
+    const liveLog = container.querySelector('[data-testid="live-log"]')!
+    const narratorSection = container.querySelector('[data-testid="narrator-section"]')!
+    const row = container.querySelector('[data-testid="conversation-row-link"]')!
+    const iteration = container.querySelector('section[id^="iteration-"]')!
+    // compareDocumentPosition: a FOLLOWING b ⇔ a renders before b.
+    const before = (a: Element, b: Element) =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+    expect(before(liveLog, narratorSection)).toBe(true)
+    expect(before(narratorSection, row)).toBe(true)
+    expect(before(row, iteration)).toBe(true)
+  })
+
+  it('omits the narrator section entirely when narrator is null', () => {
+    render(<Show {...DEFAULT_PROPS} />)
+    expect(screen.queryByTestId('narrator-section')).toBeNull()
+  })
+
+  it('renders the narrator markdown text linked to its conversation', () => {
+    render(<Show {...DEFAULT_PROPS} narrator={NARRATOR} />)
+    expect(screen.queryByText('The deck now renders a live log.')).not.toBeNull()
+    const section = screen.getByTestId('narrator-section')
+    const link = section.querySelector('a')
+    expect(link!.getAttribute('href')).toBe('/conversations/42')
+  })
+
+  it('renders one full-row anchor per conversation wrapping title + badges + time', () => {
+    render(<Show {...DEFAULT_PROPS} conversations={[CONVERSATION]} />)
+    const links = screen.getAllByTestId('conversation-row-link')
+    expect(links).toHaveLength(1)
+    const link = links[0]
+    expect(link.getAttribute('href')).toBe('/conversations/42')
+    // The anchor IS the row: every piece of content lives inside it.
+    expect(link.textContent).toContain('Build the deck')
+    expect(link.textContent).toContain('builder')
+    expect(link.textContent).toContain('completed')
+    expect(link.textContent).toContain('claude')
+    expect(link.textContent).toMatch(/ago|just now/)
+    // No nested interactive elements inside the anchor.
+    expect(link.querySelectorAll('a, button')).toHaveLength(0)
+  })
+
+  it("falls back to 'Untitled conversation' for empty AND whitespace-only titles", () => {
+    const { container } = render(
+      <Show
+        {...DEFAULT_PROPS}
+        conversations={[
+          { ...CONVERSATION, id: 43, title: '' },
+          { ...CONVERSATION, id: 44, title: '   ' },
+        ]}
+      />,
+    )
+    const links = container.querySelectorAll('[data-testid="conversation-row-link"]')
+    expect(links).toHaveLength(2)
+    expect(links[0].textContent).toContain('Untitled conversation')
+    expect(links[1].textContent).toContain('Untitled conversation')
+  })
+
+  it('renders conversations in PROP ORDER (newest-first server order, no re-sort)', () => {
+    const newer = { ...CONVERSATION, id: 50, updated_at: '2026-06-05T00:00:00Z' }
+    const older = { ...CONVERSATION, id: 40, updated_at: '2026-05-01T00:00:00Z' }
+    const { container } = render(<Show {...DEFAULT_PROPS} conversations={[newer, older]} />)
+    const links = Array.from(container.querySelectorAll('[data-testid="conversation-row-link"]'))
+    // Prop order preserved: 50 (newest) before 40 (older) — ascending updated_at
+    // would reverse them and would be the defect this layout kills.
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/conversations/50', '/conversations/40'])
+  })
+
+  it('renders a muted empty-state line when there are no conversations', () => {
+    render(<Show {...DEFAULT_PROPS} />)
+    expect(screen.queryByText('No conversations yet.')).not.toBeNull()
+  })
+
+  it('renders iterations in ascending ordinal order with #iteration-<id> anchors', () => {
     const { container } = render(<Show {...DEFAULT_PROPS} />)
     const text = container.textContent ?? ''
     const pos1 = text.indexOf('first-iter')
@@ -76,6 +194,8 @@ describe('Spaces/Show', () => {
     expect(pos2).toBeGreaterThan(-1)
     // ascending: first-iter (ordinal 1) appears before second-iter (ordinal 2)
     expect(pos1).toBeLessThan(pos2)
+    expect(container.querySelector('#iteration-10')).not.toBeNull()
+    expect(container.querySelector('#iteration-11')).not.toBeNull()
   })
 
   it('renders a decision section with its name and markdown body', () => {
@@ -84,43 +204,6 @@ describe('Spaces/Show', () => {
     expect(screen.queryByText('Grounds')).not.toBeNull()
     // Decision body rendered by Markdown (ReactMarkdown strips tags → plain text)
     expect(screen.queryByText('The grounds section body.')).not.toBeNull()
-  })
-
-  it('renders each conversation row linking to /conversations/:id', () => {
-    render(<Show {...DEFAULT_PROPS} conversations={[CONVERSATION]} />)
-    const link = screen.getByText('Build the deck').closest('a')
-    expect(link).not.toBeNull()
-    expect(link!.getAttribute('href')).toBe('/conversations/42')
-  })
-
-  it('shows role and status badges plus the model on conversation rows', () => {
-    const { container } = render(
-      <Show {...DEFAULT_PROPS} conversations={[CONVERSATION]} />,
-    )
-    expect(container.textContent).toContain('builder')
-    expect(container.textContent).toContain('completed')
-    expect(container.textContent).toContain('claude')
-  })
-
-  it('interleaves conversations on the timeline by updated_at vs occurred_at (ascending order)', () => {
-    const before = { ...CONVERSATION, id: 50, updated_at: '2026-05-31T12:00:00Z' }
-    const between = { ...CONVERSATION, id: 51, updated_at: '2026-06-01T12:00:00Z' }
-    const after = { ...CONVERSATION, id: 52, updated_at: '2026-06-03T00:00:00Z' }
-    const { container } = render(
-      <Show {...DEFAULT_PROPS} conversations={[after, between, before]} />,
-    )
-    // Use DOM order within the timeline div
-    const timeline = container.querySelector('[data-testid="timeline"]')
-    expect(timeline).not.toBeNull()
-    const children = Array.from(timeline!.children)
-    const pos = (id: number) => children.findIndex((el) => el.id === `conversation-${id}` || el.id === `iteration-${id}`)
-    // Ascending: before (May 31 noon) → iter1 (June 1) → between (June 1 noon) → iter2 (June 2) → after (June 3)
-    expect(children.findIndex((el) => el.id === 'iteration-10')).toBeGreaterThan(-1)
-    expect(pos(50)).toBeLessThan(children.findIndex((el) => el.id === 'iteration-10'))
-    expect(pos(50)).toBeLessThan(pos(51))
-    expect(children.findIndex((el) => el.id === 'iteration-10')).toBeLessThan(pos(51))
-    expect(pos(51)).toBeLessThan(children.findIndex((el) => el.id === 'iteration-11'))
-    expect(children.findIndex((el) => el.id === 'iteration-11')).toBeLessThan(pos(52))
   })
 
   it('renders in-page nav anchors when more than one iteration exists', () => {

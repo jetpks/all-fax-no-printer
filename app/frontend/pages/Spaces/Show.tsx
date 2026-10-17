@@ -1,21 +1,24 @@
 import { Head, Link } from '@inertiajs/react'
 import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
+import LiveLog from '@/components/LiveLog'
 import Markdown from '@/components/Markdown'
 import type {
   Space,
   SpaceArtifact,
   SpaceConversation,
   SpaceIteration,
+  SpaceNarrator,
 } from '@/types'
 import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, formatAbsolute, relativeTime } from './helpers'
-import { interleaveTimeline } from './timeline'
 
 type Props = {
   space: Space
   iterations: SpaceIteration[]
   conversations: SpaceConversation[]
   other_artifacts: SpaceArtifact[]
+  // The last qualifying narrator message (server-derived); null → section omitted.
+  narrator: SpaceNarrator | null
 }
 
 function ArtifactRow({ spaceId, artifact }: { spaceId: number; artifact: SpaceArtifact }) {
@@ -37,24 +40,31 @@ function ArtifactRow({ spaceId, artifact }: { spaceId: number; artifact: SpaceAr
 
 function ConversationRow({ conversation }: { conversation: SpaceConversation }) {
   return (
-    <li className="flex items-center justify-between gap-2 py-1 text-sm">
-      <div className="flex min-w-0 items-center gap-2">
-        <Link href={`/conversations/${conversation.id}`} className="truncate hover:underline">
-          {conversation.title}
-        </Link>
-        {conversation.agent_role && (
-          <Badge variant="outline" className="shrink-0">
-            {conversation.agent_role}
+    <li>
+      {/* The anchor IS the row: one block-level, full-width tap target wrapping
+          every piece of row content — works at 375px (phone-first). */}
+      <Link
+        data-testid="conversation-row-link"
+        href={`/conversations/${conversation.id}`}
+        className="block rounded border border-border px-3 py-2 text-sm hover:bg-muted/30"
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {/* Raw title from the server; empty or whitespace-only falls back here. */}
+          <span className="min-w-0 truncate">{conversation.title?.trim() || 'Untitled conversation'}</span>
+          {conversation.agent_role && (
+            <Badge variant="outline" className="shrink-0">
+              {conversation.agent_role}
+            </Badge>
+          )}
+          <Badge variant={STATUS_VARIANT[conversation.status] ?? 'outline'} className="shrink-0">
+            {conversation.status}
           </Badge>
-        )}
-        <Badge variant={STATUS_VARIANT[conversation.status] ?? 'outline'} className="shrink-0">
-          {conversation.status}
-        </Badge>
-        {conversation.model && (
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">{conversation.model}</span>
-        )}
-      </div>
-      <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(conversation.updated_at)}</span>
+          {conversation.model && (
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">{conversation.model}</span>
+          )}
+          <span className="ml-auto shrink-0 text-xs text-muted-foreground">{relativeTime(conversation.updated_at)}</span>
+        </div>
+      </Link>
     </li>
   )
 }
@@ -137,13 +147,12 @@ export default function Show({
   iterations,
   conversations,
   other_artifacts,
+  narrator,
 }: Props) {
-  const timeline = interleaveTimeline(iterations, conversations)
-  const sortedIterations = timeline
-    .filter(
-      (item): item is { type: 'iteration'; data: SpaceIteration } => item.type === 'iteration',
-    )
-    .map((item) => item.data)
+  // Iterations ascend by ordinal. Conversations render in PROP ORDER — the
+  // server sends them newest-first by updated_at; no client re-sort (the old
+  // ascending timeline sort is the defect this layout kills).
+  const sortedIterations = [...iterations].sort((a, b) => a.ordinal - b.ordinal)
 
   return (
     <AppLayout>
@@ -166,44 +175,63 @@ export default function Show({
         )}
       </header>
 
-      {sortedIterations.length > 1 && (
-        <nav className="mb-6 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-          {sortedIterations.map((iter) => (
-            <a
-              key={iter.id}
-              href={`#iteration-${iter.id}`}
-              className="text-muted-foreground hover:text-foreground hover:underline"
-            >
-              I{String(iter.ordinal).padStart(2, '0')}: {iter.name}
-            </a>
-          ))}
-        </nav>
+      {/* The deck, top to bottom: live log of the whole space, last narrator
+          message, newest-first conversations, iterations, other artifacts. */}
+      <section className="mb-6">
+        <h2 className="mb-2 text-lg font-semibold">Live</h2>
+        <LiveLog spaceId={space.id} />
+      </section>
+
+      {narrator && (
+        <section data-testid="narrator-section" className="mb-6">
+          <h2 className="mb-2 text-lg font-semibold">Narrator</h2>
+          <Link
+            href={`/conversations/${narrator.conversation_id}`}
+            className="block rounded-lg border border-border p-4 hover:bg-muted/30"
+          >
+            <Markdown text={narrator.text} />
+          </Link>
+        </section>
       )}
 
-      {timeline.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No iterations yet.</p>
-      ) : (
-        <div data-testid="timeline" className="space-y-4">
-          {timeline.map((item) =>
-            item.type === 'iteration' ? (
-              <IterationSection
-                key={`iter-${item.data.id}`}
-                space={space}
-                iteration={item.data}
-              />
-            ) : (
-              <section
-                id={`conversation-${item.data.id}`}
-                className="rounded-lg border border-border p-4"
+      <section className="mb-6">
+        <h2 className="mb-2 text-lg font-semibold">Conversations</h2>
+        {conversations.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No conversations yet.</p>
+        ) : (
+          <ul className="space-y-1">
+            {conversations.map((conversation) => (
+              <ConversationRow key={conversation.id} conversation={conversation} />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mb-6">
+        <h2 className="mb-2 text-lg font-semibold">Iterations</h2>
+        {sortedIterations.length > 1 && (
+          <nav className="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {sortedIterations.map((iter) => (
+              <a
+                key={iter.id}
+                href={`#iteration-${iter.id}`}
+                className="text-muted-foreground hover:text-foreground hover:underline"
               >
-                <ul className="divide-y divide-border">
-                  <ConversationRow conversation={item.data} />
-                </ul>
-              </section>
-            ),
-          )}
-        </div>
-      )}
+                I{String(iter.ordinal).padStart(2, '0')}: {iter.name}
+              </a>
+            ))}
+          </nav>
+        )}
+        {sortedIterations.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No iterations yet.</p>
+        ) : (
+          <div className="space-y-4">
+            {sortedIterations.map((iter) => (
+              <IterationSection key={iter.id} space={space} iteration={iter} />
+            ))}
+          </div>
+        )}
+      </section>
 
       {other_artifacts.length > 0 && (
         <section className="mt-8">

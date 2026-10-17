@@ -20,6 +20,7 @@ module Space
 
       # Spaces
       get "/spaces/:id",                      to: "spaces.show"
+      get "/spaces/:id/stream",               to: "spaces.stream"
       get "/spaces/:id/artifacts/:artifact_id", to: "spaces.artifact"
 
       # Conversations
