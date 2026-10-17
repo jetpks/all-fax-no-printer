@@ -55,6 +55,6 @@ end
 
 group :test do
   gem "minitest"
-  gem "rom-factory", "0.13.0"
+  gem "rom-factory", "0.14.1"
   gem "faker"
 end
