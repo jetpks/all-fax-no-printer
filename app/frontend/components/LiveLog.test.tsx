@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import LiveLog, { LIVE_LOG_LIMIT, TAG_COLORS } from './LiveLog'
 
-// Same stub pattern as ConversationStream.test.tsx — a minimal stand-in for the
+// Same stub pattern as the page tests — a minimal stand-in for the
 // browser EventSource: capture instances, emit(data, lastEventId).
 class MockEventSource {
   static instances: MockEventSource[] = []

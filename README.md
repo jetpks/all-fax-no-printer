@@ -28,8 +28,11 @@ The UI leads with spaces: `/` and `/spaces` are the spaces index,
   are grouped by working directory under the index's "Unspaced" section.
 - **Conversations** — every captured agent session lands as a conversation
   (index at `/conversations`, show at `/conversations/:id`, publish toggle,
-  delete). A capture still landing mounts a live view on its show page while
-  its status is `pending` or `live`. The parser is the pi harness stream
+  delete). A capture still landing mounts a LiveLog on its show page — a
+  looplog-style event log of the streaming capture — while its status is
+  `pending` or `live`. The landed body reads as flat prompt/reply pairs per
+  turn: prose as markdown, tool exchanges folded to one-line rows, thinking
+  collapsed, with the turn sidebar as the jump nav. The parser is the pi harness stream
   (`lib/space/server/normalizer/pi.rb`); a body that parses but yields no
   recognizable events fails the conversation visibly instead of leaving it
   `live` forever (pi's first-line classification doesn't claim fails the

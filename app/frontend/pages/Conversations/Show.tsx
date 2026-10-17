@@ -13,25 +13,13 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import ConversationStream from '@/components/ConversationStream'
-import type { SSEState } from '@/lib/sse-reducer'
-import { isEncryptedThinking } from '@/lib/tools'
-import {
-  buildCommandPairs,
-  buildFoldedIndex,
-  buildToolResultIndex,
-  hasOwnReason,
-  isAbsorbed,
-} from '@/lib/message-pairing'
+import LiveLog from '@/components/LiveLog'
+import { buildCommandPairs, buildFoldedIndex, buildToolResultIndex } from '@/lib/message-pairing'
 import { parseAnchor, turnMessages } from '@/lib/anchors'
 import Turn from '@/components/Turn'
 import TurnToc from '@/components/TurnToc'
 import AppLayout from '@/layouts/AppLayout'
-import type {
-  Conversation,
-  Round as RoundType,
-  Turn as TurnType,
-} from '@/types'
+import type { Conversation, Turn as TurnType } from '@/types'
 
 type Props = {
   conversation: Conversation
@@ -49,31 +37,18 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   failed: 'destructive',
 }
 
-// A subtle, distinct background tint per turn, cycled by index via the golden
-// angle so adjacent turns never collide. Saturation/lightness ride the
-// --turn-band-s/--turn-band-l custom properties (entrypoints/application.css)
-// so the band reads as a visible light tint on a light page and the original
-// very-dark wash in dark mode; the same color lights up the TOC entry when its
-// turn is on screen.
-function turnColor(index: number): string {
-  const hue = Math.round((index * 137.508) % 360)
-  return `hsl(${hue} var(--turn-band-s) var(--turn-band-l))`
-}
+// The annotation anchors of the old notes tier are gone, so the pairing/fold
+// rules see an always-empty set — the same empty set the frozen Spaces pages
+// pass. A module constant keeps buildFoldedIndex's memo deps honest.
+const NO_ANNOTATED_IDS = new Set<number>()
 
 export default function Show({ conversation, turns }: Props) {
-  // A capture still landing (ingest mouth not yet terminal) streams in below —
-  // the banner is the page-level signal; the badge is per-row.
+  // A capture still landing (ingest mouth not yet terminal) streams into the
+  // I12 LiveLog below — the log is the page-level signal; the badge is per-row.
   const isLiveCapture = conversation.status === 'pending' || conversation.status === 'live'
-  const [streamStatus, setStreamStatus] = useState<SSEState['status']>('pending')
 
-  // Stable across renders so it's a stable prop for the memoized Turn (and the
-  // TOC), not a fresh Map every time activeTurns ticks during a scroll.
-  const turnColors = useMemo(
-    () => new Map(turns.map((t, i) => [t.anchor_id, turnColor(i)])),
-    [turns],
-  )
   // Which turns are currently on screen — drives the TOC highlight so you can
-  // see your position even color-blind (the lit entries are the visible range).
+  // see your position even color-blind.
   const [activeTurns, setActiveTurns] = useState<Set<number>>(new Set())
 
   useEffect(() => {
@@ -112,37 +87,47 @@ export default function Show({ conversation, turns }: Props) {
   }, [turns])
   const [pendingScroll, setPendingScroll] = useState<{
     target: string
+    // A deep-linked message id (reveal) — the `#round-…` fallback lives here:
+    // rounds no longer render as containers, but a round's anchor id IS a
+    // message id (Round#anchor in app/transcript/round.rb), so the same id
+    // resolves as `#message-<id>` on the row that holds it.
+    messageId: number | null
     turn: number
   } | null>(null)
-  // The marker message a TOC jump asked us to reveal — handed to its turn so the
-  // round holding it opens. Cleared once consumed so re-clicking the same marker
-  // (after a manual collapse) reveals it again.
+  // The marker message a TOC jump asked us to reveal — handed to its turn so
+  // the action row holding it opens. Cleared once consumed so re-clicking the
+  // same marker (after a manual collapse) reveals it again.
   const [revealId, setRevealId] = useState<number | null>(null)
 
-  // Jump from the TOC: reveal the target round (if a marker is buried in a folded
-  // round) and scroll once the DOM has settled (deferred via state so the scroll
-  // runs after the re-render that opens a just-revealed round). Turns no longer
-  // fold, so every `#round-…` / `#turn-…` anchor is already mounted.
-  // Stable (useCallback) so it's a steady prop for the memoized TOC without
-  // churning it on every scroll-driven re-render.
+  // Jump from the TOC or a deep link: reveal the target (if it's an action row)
+  // and scroll once the DOM has settled (deferred via state so the scroll runs
+  // after the re-render that expands a just-revealed row). Stable (useCallback)
+  // so it's a steady prop for the memoized TOC without churning it on every
+  // scroll-driven re-render.
   const jumpTo = useCallback((anchorId: number, target?: string, reveal?: number) => {
     setRevealId(reveal ?? null)
     setPendingScroll({
       target: target ? `#${target}` : `#turn-${anchorId}`,
+      messageId: reveal ?? null,
       turn: anchorId,
     })
   }, [])
 
   useEffect(() => {
     if (!pendingScroll) return
-    // The precise anchor may not be mounted yet — a tool row inside a round that
-    // the reveal is opening in this same commit — so retry a few frames before
-    // falling back to the turn top (a marker that's the turn's terminal renders
-    // as a plain Message with no `${marker}-id`; the click still gets you there).
+    // The precise anchor may not be mounted yet — an action row the reveal is
+    // expanding in this same commit — so retry a few frames before falling back:
+    // first to `#message-<id>` (what a `#round-<id>` fragment degrades to), then
+    // to the turn top (a marker that's the turn's terminal renders as a plain
+    // message; the click still gets you there).
     let tries = 0
     let raf = 0
     const attempt = () => {
-      const el = document.querySelector(pendingScroll.target)
+      const el =
+        document.querySelector(pendingScroll.target) ??
+        (pendingScroll.messageId != null
+          ? document.querySelector(`#message-${pendingScroll.messageId}`)
+          : null)
       if (!el && tries++ < 5) {
         raf = requestAnimationFrame(attempt)
         return
@@ -166,42 +151,24 @@ export default function Show({ conversation, turns }: Props) {
 
   // These indices are a pure function of the props, so memoize them — otherwise
   // every activeTurns tick while scrolling recomputed all of them. They also feed
-  // the memoized Turn as stable props. The annotation anchors of the old notes
-  // tier are gone, so the pairing/fold rules below see an always-empty set — the
-  // same empty set the frozen Spaces pages pass.
-  const emptyAnnotatedIds = useMemo(() => new Set<number>(), [])
+  // the memoized Turn as stable props: the pairing/fold indices plus each turn's
+  // non-prompt message list in stream order (the turn itself decides what's
+  // visible when it renders — see Turn's visibility peel).
   const messages = useMemo(() => turns.flatMap(turnMessages), [turns])
   const toolResults = useMemo(() => buildToolResultIndex(messages), [messages])
   const commandPairs = useMemo(() => buildCommandPairs(messages), [messages])
   const folded = useMemo(
     () =>
-      buildFoldedIndex(messages, toolResults, commandPairs.foldedByCommandId, emptyAnnotatedIds),
-    [messages, toolResults, commandPairs, emptyAnnotatedIds],
+      buildFoldedIndex(messages, toolResults, commandPairs.foldedByCommandId, NO_ANNOTATED_IDS),
+    [messages, toolResults, commandPairs],
   )
-
-  // A turn renders the server's rounds minus the messages whose content is
-  // already shown inline elsewhere (paired tool results, absorbed command
-  // stdout) or is just the model's encrypted chain-of-thought (opaque
-  // ciphertext, nothing to read) — unless it's a published snippet. The round
-  // *partition* is the server's; only visibility is decided here. Precomputed
-  // per turn so each Turn gets a stable rounds array rather than a fresh
-  // filter() each render.
-  const visibleRounds = useMemo(() => {
-    const visible = (turn: TurnType): RoundType[] =>
-      turn.rounds
-        .map((round) => ({
-          anchor_id: round.anchor_id,
-          messages: round.messages.filter((m) => {
-            // Its own reason to stay overrides every fold rule below.
-            if (hasOwnReason(m, emptyAnnotatedIds)) return true
-            if (commandPairs.absorbedIds.has(m.id)) return false
-            if (isEncryptedThinking(m)) return false
-            return !isAbsorbed(m, toolResults, emptyAnnotatedIds)
-          }),
-        }))
-        .filter((round) => round.messages.length > 0)
-    return new Map(turns.map((t) => [t.anchor_id, visible(t)]))
-  }, [turns, toolResults, commandPairs, emptyAnnotatedIds])
+  const replyByTurn = useMemo(
+    () =>
+      new Map(
+        turns.map((t) => [t.anchor_id, turnMessages(t).filter((m) => m.id !== t.prompt?.id)]),
+      ),
+    [turns],
+  )
 
   // Owning turn per message id — how a deep link to a round/tool/message finds
   // the turn that must reveal it.
@@ -213,7 +180,7 @@ export default function Show({ conversation, turns }: Props) {
 
   // Honor an entity address arriving in the URL fragment (#turn-12, #round-34,
   // #tool-56, #message-78, or a marker) — on first paint and on later hash
-  // changes: scroll to it, unfolding the round/tool that buries it. The same
+  // changes: scroll to it, expanding the tool row that buries it. The same
   // jumpTo path the TOC uses, so deep links and TOC clicks can't drift apart.
   useEffect(() => {
     const followHash = () => {
@@ -252,7 +219,6 @@ export default function Show({ conversation, turns }: Props) {
         <div className="mt-3">
           <TurnToc
             turns={turns}
-            colors={turnColors}
             active={activeTurns}
             projectRoot={conversation.original_cwd}
             onJump={jumpTo}
@@ -265,11 +231,9 @@ export default function Show({ conversation, turns }: Props) {
           <div className="sticky top-6">
             <TurnToc
               turns={turns}
-              colors={turnColors}
               active={activeTurns}
               projectRoot={conversation.original_cwd}
               onJump={jumpTo}
-              scrollable
             />
           </div>
         </aside>
@@ -291,7 +255,6 @@ export default function Show({ conversation, turns }: Props) {
               </Badge>
               {turns.length} turns
               {conversation.published && <Badge variant="secondary">published</Badge>}
-              {isLiveCapture && streamStatus === 'live' && <span>· streaming</span>}
             </p>
 
             <dl className="mt-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 text-xs text-muted-foreground">
@@ -358,25 +321,27 @@ export default function Show({ conversation, turns }: Props) {
           )}
 
           {isLiveCapture && (
-            <div data-testid="live-capture" className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
-              <p className="text-sm text-muted-foreground">
-                Live — this capture is still landing; its messages stream in below.
-              </p>
-              <ConversationStream
-                conversationId={conversation.id}
-                onStatusChange={setStreamStatus}
-              />
+            // The I12 LiveLog (frozen seam) replaces the old streamed-message
+            // tree: a looplog-style event log while the capture is landing —
+            // conversation mode consumes /conversations/:id/stream unfiltered,
+            // closes on conversation_complete, and re-syncs on refocus.
+            <div
+              data-testid="live-capture"
+              className="mb-4 rounded-lg border border-border bg-muted/30 p-4"
+            >
+              <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Live capture</h2>
+              <LiveLog conversationId={conversation.id} />
             </div>
           )}
 
-          <ol className="mt-4 space-y-3">
-            {turns.map((turn, i) => (
+          <ol className="mt-4 space-y-6">
+            {turns.map((turn) => (
               <Turn
                 key={turn.anchor_id}
                 anchorId={turn.anchor_id}
-                number={i + 1}
                 prompt={turn.prompt}
-                rounds={visibleRounds.get(turn.anchor_id) ?? []}
+                absorbedIds={commandPairs.absorbedIds}
+                reply={replyByTurn.get(turn.anchor_id) ?? []}
                 conversationId={conversation.id}
                 toolResults={toolResults}
                 commandStdout={commandPairs.stdoutByMessageId}
@@ -386,7 +351,6 @@ export default function Show({ conversation, turns }: Props) {
                     ? revealId
                     : null
                 }
-                color={turnColors.get(turn.anchor_id) ?? 'transparent'}
                 projectRoot={conversation.original_cwd}
                 owner={conversation.owner}
               />

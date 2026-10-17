@@ -1,197 +1,178 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-import type { Annotation, Message as MessageType, Round as RoundType, ToolResultIndex } from '@/types'
-
-vi.mock('@inertiajs/react', () => ({
-  useForm: () => ({ data: {}, post: vi.fn(), reset: vi.fn() }),
-  usePage: () => ({ props: { current_user: null, flash: {} } }),
-  router: { delete: vi.fn() },
-}))
-
-vi.mock('@/components/UserChip', () => ({
-  default: ({ name }: { name: string }) => <span>{name}</span>,
-}))
-
-vi.mock('@/components/Message', () => ({
-  default: ({ message, marker }: { message: MessageType; marker?: string }) => (
-    <div data-testid={`message-${message.id}`} data-marker={marker ?? ''}>
-      message-{message.id}
-    </div>
-  ),
-}))
-
-vi.mock('@/components/BarMenu', () => ({
-  default: ({ label }: { label: string }) => (
-    <div data-testid={`bar-menu-${label.replace(/\s+/g, '-').toLowerCase()}`}>{label}</div>
-  ),
-}))
-
+import { describe, expect, it } from 'vitest'
+import type { Message as MessageType, ToolResultIndex } from '@/types'
+import { buildToolResultIndex } from '@/lib/message-pairing'
 import Turn from '@/components/Turn'
 
-const OWNER = { username: 'tester', name: null, avatar_url: null }
-const EMPTY_TOOL_RESULTS: ToolResultIndex = { byUseId: {}, useIds: new Set() }
+const OWNER = { username: 'eric', name: 'Eric', avatar_url: null }
 
-function makeToolMessage(id: number): MessageType {
+function makeMessage(id: number, blocks: MessageType['blocks'], role = 'assistant'): MessageType {
   return {
     id,
-    role: 'assistant',
+    role,
     model: null,
     position: id,
     published: false,
     can_publish: false,
-    blocks: [{ type: 'tool_use', id: `tu-${id}`, name: 'Bash', input: { command: 'echo hi' } }],
+    blocks,
   }
 }
 
-// A text (non-action) message — used as the turn's terminal so tool messages
-// are not mistakenly peeled off as the terminal by Turn's intermediate logic.
-function makeTextMessage(id: number): MessageType {
+function makeTurn(
+  reply: MessageType[],
+  prompt: MessageType | null = null,
+  toolResults: ToolResultIndex = { byUseId: {}, useIds: new Set() },
+): {
+  anchorId: number
+  prompt: MessageType | null
+  absorbedIds: Set<number>
+  reply: MessageType[]
+  conversationId: number
+  toolResults: ToolResultIndex
+  commandStdout: Record<number, string>
+  folded: Record<number, MessageType[]>
+  reveal: number | null
+  projectRoot: string | null
+  owner: typeof OWNER
+} {
   return {
-    id,
-    role: 'assistant',
-    model: null,
-    position: id,
-    published: false,
-    can_publish: false,
-    blocks: [{ type: 'text', text: 'done.' }],
+    anchorId: 1,
+    prompt,
+    absorbedIds: new Set<number>(),
+    reply,
+    conversationId: 42,
+    toolResults,
+    commandStdout: {},
+    folded: {},
+    reveal: null,
+    projectRoot: null,
+    owner: OWNER,
   }
 }
 
-function makeRound(anchorId: number, messages: MessageType[]): RoundType {
-  return { anchor_id: anchorId, messages }
-}
+const prompt = makeMessage(10, [{ type: 'text', text: 'fix the frobnicator' }], 'user')
 
-const BASE_PROPS = {
-  anchorId: 1,
-  number: 1,
-  prompt: null,
-  rounds: [] as RoundType[],
-  conversationId: 42,
-  annotations: new Map<string, Annotation[]>(),
-  toolResults: EMPTY_TOOL_RESULTS,
-  commandStdout: {} as Record<number, string>,
-  folded: {} as Record<number, MessageType[]>,
-  reveal: null,
-  color: 'transparent',
-  projectRoot: null,
-  owner: OWNER,
-}
+// A tool call and its paired result — the pair the flat body folds into one row.
+const toolMessage = makeMessage(11, [
+  { type: 'tool_use', id: 'tu-1', name: 'Bash', input: { command: 'echo hi' } },
+])
+const resultMessage = makeMessage(
+  12,
+  [{ type: 'tool_result', tool_use_id: 'tu-1', content: 'hi out' }],
+  'user',
+)
+const paired = buildToolResultIndex([toolMessage, resultMessage]) as ToolResultIndex
 
-// Four tools — exceeds the old AUTO_EXPAND_ACTIONS threshold of 3.
-// A trailing text message (id=999) acts as the terminal so all 4 tools
-// remain as intermediate action rows and each gets an anchor id.
-const tools = [101, 102, 103, 104].map(makeToolMessage)
-const round = makeRound(10, [...tools, makeTextMessage(999)])
-
-describe('Turn — flat tool rendering inside open round', () => {
-  // The collapsed round renders a chevron button + a gist button, both with
-  // aria-label "Expand round". The chevron (first in DOM) is the proper toggle.
-  function openRound() {
-    fireEvent.click(screen.getAllByRole('button', { name: /expand round/i })[0])
-  }
-
-  it('tools are NOT visible while round is collapsed', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    expect(screen.queryByTestId('message-101')).toBeNull()
+describe('Turn — flat pairs', () => {
+  it('renders the prompt with the owner chip', () => {
+    render(<Turn {...makeTurn([], prompt)} />)
+    expect(screen.getByText('fix the frobnicator')).not.toBeNull()
+    expect(screen.getByText('Eric')).not.toBeNull()
+    expect(document.querySelector('#prompt-10')).not.toBeNull()
   })
 
-  it('all tools (including >3) are visible inline after opening round — no per-tool expand needed', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    for (const t of tools) {
-      expect(screen.getByTestId(`message-${t.id}`)).not.toBeNull()
-    }
+  it('renders a prompt-less turn as a preamble line', () => {
+    render(<Turn {...makeTurn([])} />)
+    expect(screen.getByText(/Opening context before the first prompt\./)).not.toBeNull()
   })
 
-  it('no per-tool BarMenu ("Tool actions") exists when round is open (AC-3)', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    expect(screen.queryByTestId('bar-menu-tool-actions')).toBeNull()
+  it('renders one container with the turn anchor id', () => {
+    render(<Turn {...makeTurn([toolMessage, resultMessage], prompt)} toolResults={paired} />)
+    const li = document.querySelector('li#turn-1')
+    expect(li).not.toBeNull()
+    expect(li!.getAttribute('data-turn-id')).toBe('1')
+    expect(li!.className).toContain('scroll-mt-20')
   })
 
-  it('no per-tool expand/collapse button exists when round is open (AC-3)', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    // Only the round-level "Collapse round" button should exist; no per-tool ones.
-    expect(screen.queryByRole('button', { name: 'Expand' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Collapse' })).toBeNull()
+  it('an action message renders as ONE collapsed row with the toolLabel one-liner', () => {
+    render(<Turn {...makeTurn([toolMessage, resultMessage], prompt)} toolResults={paired} />)
+
+    // Collapsed: the one-liner is visible, the call body and its result are not.
+    expect(screen.getByText('→ Bash')).not.toBeNull()
+    expect(screen.queryByText('hi out')).toBeNull()
+    // Exactly one toggle row for the tool call.
+    expect(screen.getAllByRole('button', { name: 'Expand action' })).toHaveLength(1)
   })
 
-  it('no FOLD_FRAME bracket (rounded-tl-md) on inline tool wrapper (AC-3)', () => {
-    const { container } = render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    // Only the summary fold (not present here) uses FOLD_FRAME; tool wrappers must not.
-    expect(container.querySelectorAll('[class*="rounded-tl-md"]')).toHaveLength(0)
+  it('expanding the row renders the tool call with its result inline', () => {
+    render(<Turn {...makeTurn([toolMessage, resultMessage], prompt)} toolResults={paired} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand action' }))
+    expect(screen.getByText('hi out')).not.toBeNull()
+    // The row carries the tool anchor id and it was NOT duplicated.
+    expect(document.querySelectorAll('#tool-11')).toHaveLength(1)
   })
 
-  it('round chevron toggles round open and closed (AC-4a)', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    expect(screen.queryByTestId('message-101')).toBeNull()
+  it('an absorbed result-only message is absent', () => {
+    render(<Turn {...makeTurn([resultMessage])} toolResults={paired} />)
 
-    openRound()
-    expect(screen.getByTestId('message-101')).not.toBeNull()
-
-    // Once open, there is exactly one "Collapse round" button (the chevron).
-    fireEvent.click(screen.getByRole('button', { name: /collapse round/i }))
-    expect(screen.queryByTestId('message-101')).toBeNull()
+    expect(screen.queryByText('hi out')).toBeNull()
   })
 
-  it('each inline tool carries anchor id (tool-${id}) and scroll-mt-20 (AC-4b)', () => {
-    const { container } = render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    for (const t of tools) {
-      const el = container.querySelector(`#tool-${t.id}`)
-      expect(el).not.toBeNull()
-      expect(el!.className).toContain('scroll-mt-20')
-    }
+  it('a published message stays visible even when result-only', () => {
+    const published = { ...resultMessage, published: true }
+    render(<Turn {...makeTurn([published])} toolResults={paired} />)
+
+    // The message element stays in the tree (its result text is suppressed by
+    // Block as an inline duplicate of the paired call's body).
+    expect(document.querySelector('#message-12')).not.toBeNull()
   })
 
-  it('non-marked tools use tool-${id} anchor (AC-4b)', () => {
-    // All four test tools are Bash (non-marked), so anchor must be tool-${id}.
-    const { container } = render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    for (const t of tools) {
-      expect(container.querySelector(`#tool-${t.id}`)).not.toBeNull()
-    }
+  it('encrypted thinking is absent', () => {
+    render(<Turn {...makeTurn([makeMessage(13, [{ type: 'redacted_thinking', data: 'x' }])])} />)
+
+    expect(screen.queryByText(/thinking/)).toBeNull()
   })
 
-  it('round with two tools renders both inline (structure check)', () => {
-    const twoTools = [makeToolMessage(201), makeToolMessage(202)]
-    const r = makeRound(20, twoTools)
-    render(<Turn {...BASE_PROPS} rounds={[r]} />)
-    fireEvent.click(screen.getAllByRole('button', { name: /expand round/i })[0])
-    expect(screen.getByTestId('message-201')).not.toBeNull()
-    expect(screen.getByTestId('message-202')).not.toBeNull()
-  })
-})
+  it('the /compact summary renders behind a disclosure', () => {
+    const summary = makeMessage(
+      14,
+      [
+        {
+          type: 'text',
+          text: 'This session is being continued from a previous conversation that ran out of context. Earlier we fixed the frobnicator.',
+        },
+      ],
+      'user',
+    )
+    render(<Turn {...makeTurn([summary])} />)
 
-describe('Turn — open-round width: right cluster hidden when open (I12)', () => {
-  function openRound() {
-    fireEvent.click(screen.getAllByRole('button', { name: /expand round/i })[0])
-  }
-
-  it('tool count text is absent when round is open (AC-3)', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    // "4 tools" must not appear anywhere in the open round header
-    expect(screen.queryByText(/\d+ tools?/)).toBeNull()
+    // Collapsed: the disclosure row, not the summary prose.
+    expect(screen.queryByText(/Earlier we fixed/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand summary' }))
+    expect(screen.getByText(/Earlier we fixed/)).not.toBeNull()
   })
 
-  it('round BarMenu ("Round actions") is absent when round is open (AC-3)', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    openRound()
-    expect(screen.queryByTestId('bar-menu-round-actions')).toBeNull()
+  it('thinking renders behind a collapsed affordance that expands', () => {
+    render(
+      <Turn {...makeTurn([makeMessage(15, [{ type: 'thinking', thinking: 'pondering deeply' }])])} />,
+    )
+
+    expect(screen.queryByText('pondering deeply')).toBeNull()
+    fireEvent.click(screen.getByText('thinking'))
+    expect(screen.getByText('pondering deeply')).not.toBeNull()
   })
 
-  it('collapsed round still shows tool count (AC-4 invariant)', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    // Before opening: count must be visible
-    expect(screen.getByText('4 tools')).not.toBeNull()
+  it('a marker jump (reveal) expands the target action row', () => {
+    const decision = makeMessage(16, [
+      {
+        type: 'tool_use',
+        id: 'tu-2',
+        name: 'ExitPlanMode',
+        input: { plan: [{ step: 'ship it', status: 'pending' }] },
+      },
+    ])
+    render(<Turn {...makeTurn([decision])} toolResults={paired} reveal={16} />)
+
+    // Revealed by the jump: expanded without a click.
+    expect(screen.getByText(/ship it/)).not.toBeNull()
+    // The marker id anchors the row.
+    expect(document.querySelector('#decision-16')).not.toBeNull()
   })
 
-  it('collapsed round still shows round BarMenu (AC-4 invariant)', () => {
-    render(<Turn {...BASE_PROPS} rounds={[round]} />)
-    // Before opening: menu must be present
-    expect(screen.getByTestId('bar-menu-round-actions')).not.toBeNull()
+  it('an interrupt marker renders as an ordinary narrative message', () => {
+    render(<Turn {...makeTurn([makeMessage(17, [{ type: 'text', text: '<turn_aborted>' }])])} />)
+
+    expect(screen.getByText('[interrupted by user]')).not.toBeNull()
   })
 })

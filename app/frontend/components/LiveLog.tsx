@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-// Types only — sse-reducer is ENTRY 3's file, byte-identical, never edited here.
-import type { SSEEvent } from '@/lib/sse-reducer'
+// Types only — the SSE event vocabulary lives in '@/types' alongside the rest
+// of the wire shapes.
+import type { SSEEvent } from '@/types'
 
 export type LiveLogProps = {
   /** Conversation mode: consume /conversations/:id/stream, unfiltered. */
@@ -54,8 +55,8 @@ type Line = {
 // conversations; the tag is the envelope's `tag` field, conversation mode has none).
 type Entry = { convId: number; tag: string | null; line: Line }
 
-// Per-conversation accumulation state (our own — not the sse-reducer's shape;
-// we only need enough to paint lines, not to replay a message tree).
+// Per-conversation accumulation state (our own — enough to paint lines, not to
+// replay a message tree).
 type ConvAcc = {
   lastId: string | null
   complete: boolean
@@ -349,8 +350,8 @@ export default function LiveLog(props: LiveLogProps) {
         const convId = spaceMode ? Number(event.conversation_id) : (convModeId as number)
         if (!Number.isFinite(convId)) return
         setState((prev) => applyFrame(prev, convId, event, e.lastEventId || null, !spaceMode))
-        // Conversation mode: conversation_complete is terminal — close (parity
-        // with ConversationStream). Space mode NEVER closes: the stream is
+        // Conversation mode: conversation_complete is terminal — close (the capture
+        // has finished landing). Space mode NEVER closes: the stream is
         // long-lived and native reconnect carries Last-Event-ID.
         if (!spaceMode && event.type === 'conversation_complete') {
           doneRef.current = true
