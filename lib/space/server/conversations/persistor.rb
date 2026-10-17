@@ -5,17 +5,19 @@ require_relative "../nul_scrub"
 
 module Space
   module Server
-    module Runs
-      # Consumes normalized events and incrementally persists messages to a
-      # conversation linked to the run.  Blocks are accumulated in memory;
-      # a DB write happens on each message_complete (or tool_result).
+    module Conversations
+      # Consumes normalized events and incrementally persists messages onto a
+      # conversation. Blocks are accumulated in memory; a DB write happens on
+      # each message_complete (or tool_result).
       #
       # Usage:
       #   persistor = Persistor.new(conversations_repo, messages_repo)
-      #   persistor.setup(run)        # creates the conversation, returns it
+      #   persistor.setup(conversation)  # binds to the conversation, returns it
       #   events.each { persistor.process(_1) }
-      #   run_record.conversation_id  # use persistor.conversation_id to link
+      #   persistor.conversation_id      # the bound conversation
       class Persistor
+        TITLE_MAX_LENGTH = 80
+
         attr_reader :conversation_id, :first_model
 
         def initialize(conversations_repo, messages_repo)
@@ -24,19 +26,16 @@ module Space
           reset!
         end
 
-        # Creates a conversation owned by the run's user and returns it.
-        # Must be called before process.
-        def setup(run, source: "architect_dispatch")
-          conv = @conversations_repo.create(
-            user_id:    run.user_id,
-            status:     0,
-            published:  false,
-            source:     source,
-            created_at: Time.now,
-            updated_at: Time.now
-          )
-          @conversation_id = conv.id
-          conv
+        # Binds to an existing conversation (created or found by the ingest
+        # mouth's find-or-create). Must be called before process. Message
+        # positions continue from the conversation's existing message count,
+        # so append chunks land in order across POSTs.
+        def setup(conversation)
+          @conversation_id = conversation.id
+          @title           = conversation.title
+          @model           = conversation.model
+          @position        = conversation.turns_count.to_i
+          conversation
         end
 
         def process(event)
@@ -58,6 +57,8 @@ module Space
           @position        = 0
           @current_msg     = nil
           @first_model     = nil
+          @title           = nil
+          @model           = nil
         end
 
         def start_message(event)
@@ -117,8 +118,9 @@ module Space
             created_at:      Time.now,
             updated_at:      Time.now
           )
-          @position    += 1
-          @current_msg  = nil
+          @position += 1
+          materialize_metadata(@current_msg[:role])
+          @current_msg = nil
         end
 
         def write_tool_result(event)
@@ -139,6 +141,41 @@ module Space
             updated_at:      Time.now
           )
           @position += 1
+          materialize_count
+        end
+
+        # Metadata lands on the conversation once, from the message that first
+        # carries it: title from the first user message's leading text block
+        # (≤ TITLE_MAX_LENGTH chars), model from the first assistant message.
+        # turns_count is the running message count. Never overwrites. Called
+        # from flush_message only — a tool_result row is not a turn-prompt and
+        # its pending assistant message was already materialized by the flush.
+        def materialize_metadata(role)
+          materialize_count
+          return unless @current_msg
+
+          updates = {}
+          if @title.nil? && role == "user"
+            leading = leading_text_block
+            updates[:title] = leading[0, TITLE_MAX_LENGTH] unless leading.empty?
+          end
+          updates[:model] = @first_model if @model.nil? && @first_model
+
+          @conversations_repo.update(@conversation_id, updates) unless updates.empty?
+          @title = updates[:title] if updates.key?(:title)
+          @model = updates[:model] if updates.key?(:model)
+        end
+
+        # The first user message's leading text block's text (empty when the
+        # message opens with anything else).
+        def leading_text_block
+          leading = Array(@current_msg[:ordered]).first
+          return "" unless leading.is_a?(Hash) && leading["type"] == "text"
+          leading["text"].to_s
+        end
+
+        def materialize_count
+          @conversations_repo.update(@conversation_id, turns_count: @position, updated_at: Time.now)
         end
       end
     end

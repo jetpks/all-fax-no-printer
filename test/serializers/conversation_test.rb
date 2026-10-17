@@ -18,7 +18,7 @@ class TestConversationWithTurns < SimpleDelegator
 end
 
 class ConversationListJsonTest < Minitest::Test
-  EXPECTED_KEYS = %i[id title status published turns_count owned].freeze
+  EXPECTED_KEYS = %i[id title status published turns_count owned agent_role agent_name model original_cwd space_id updated_at].freeze
 
   def owner     = TestUser.new(id: 1, username: "alice", name: "Alice", avatar_url: "http://a.example")
   def viewer    = TestUser.new(id: 2, username: "bob",   name: "Bob",   avatar_url: "http://b.example")
@@ -26,6 +26,8 @@ class ConversationListJsonTest < Minitest::Test
     base = TestConversation.new(
       id: 42, title: title, status: :completed, published: false,
       source: nil, original_cwd: nil, git_branch: nil, agent_version: nil,
+      agent_role: "builder", agent_name: "mouth-lane", model: "minimax/minimax-m3",
+      space_id: 3, updated_at: Time.at(0).utc,
       user: owner, owner_id: 1
     )
     TestConversationWithTurns.new(base, turns_count)
@@ -71,7 +73,7 @@ end
 class ConversationJsonTest < Minitest::Test
   EXPECTED_KEYS = %i[
     id title status published source original_cwd git_branch agent_version
-    can_manage owner
+    agent_role agent_name model space_id can_manage owner
   ].freeze
   OWNER_KEYS = %i[username name avatar_url].freeze
 
@@ -82,6 +84,8 @@ class ConversationJsonTest < Minitest::Test
     TestConversation.new(
       id: 7, title: "Chat", status: :completed, published: false,
       source: "claude", original_cwd: "/tmp", git_branch: "main", agent_version: "1.0",
+      agent_role: "builder", agent_name: "mouth-lane", model: "minimax/minimax-m3",
+      space_id: 3, updated_at: Time.at(0).utc,
       user: owner_user, owner_id: 1
     )
   end
@@ -124,6 +128,10 @@ class ConversationJsonTest < Minitest::Test
     assert_equal "/tmp",   result[:original_cwd]
     assert_equal "main",   result[:git_branch]
     assert_equal "1.0",    result[:agent_version]
+    assert_equal "builder",           result[:agent_role]
+    assert_equal "mouth-lane",        result[:agent_name]
+    assert_equal "minimax/minimax-m3", result[:model]
+    assert_equal 3,                    result[:space_id]
   end
 end
 

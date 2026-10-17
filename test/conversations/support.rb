@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-# Minimal bootstrap for runs unit tests — does NOT boot Hanami.
+# Minimal bootstrap for conversations unit tests — does NOT boot Hanami.
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 
-require "space/server/runs"
+require "space/server/conversations"
 require "minitest/autorun"

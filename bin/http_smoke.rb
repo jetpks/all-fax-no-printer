@@ -13,7 +13,7 @@ ENV["HANAMI_ENV"] ||= "test"
 require "hanami/boot"
 require "rack/mock"
 
-INERTIA_GET_PATHS = %w[/ /conversations /conversations/1].freeze
+INERTIA_GET_PATHS = %w[/ /spaces /conversations /conversations/1].freeze
 
 def smoke_call(verb, path)
   env = Rack::MockRequest.env_for(path, "REQUEST_METHOD" => verb)
@@ -36,17 +36,16 @@ ANON_ROUTES = [
   ["DELETE", "/logout"],
   ["GET",    "/"],
   ["GET",    "/conversations"],
+  # Spaces (private — owner-only; anon/stranger → redirect, never 5xx)
+  ["GET",    "/spaces/1"],
+  ["GET",    "/spaces/1/artifacts/1"],
   # Auth-required routes — anon → 401, not 5xx
   ["GET",    "/conversations/1"],
+  ["GET",    "/conversations/1/stream"],
+  ["POST",   "/conversations/ingest"],
   ["PATCH",  "/conversations/1/publish"],
   ["DELETE", "/conversations/1"],
   ["PATCH",  "/messages/1/publish"],
-  ["GET",    "/runs"],
-  ["POST",   "/runs"],
-  ["POST",   "/runs/1/ingest"],
-  ["GET",    "/runs/1/stream"],
-  ["GET",    "/runs/1"],
-  ["GET",    "/spaces"],
   ["GET",    "/api_tokens"],
 ].freeze
 

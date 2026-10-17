@@ -24,6 +24,14 @@ Factory.define(:conversation) do |f|
   f.published { false }
   f.created_at { Time.now }
   f.updated_at { Time.now }
+  # I08 ingest-mouth metadata — nullable; set via overrides when needed.
+  f.session_id     { nil }
+  f.space_id       { nil }
+  f.agent_role     { nil }
+  f.agent_name     { nil }
+  f.model          { nil }
+  f.original_cwd   { nil }
+  f.turns_count    { 0 }
 end
 
 Factory.define(:message) do |f|
@@ -32,15 +40,6 @@ Factory.define(:message) do |f|
   f.content  { [] }
   f.position { Faker::Number.unique.between(from: 1, to: 9999) }
   f.published { false }
-  f.created_at { Time.now }
-  f.updated_at { Time.now }
-end
-
-Factory.define(:run) do |f|
-  f.association(:user)
-  f.status    { 0 }
-  f.published { false }
-  f.role      { "builder" }
   f.created_at { Time.now }
   f.updated_at { Time.now }
 end

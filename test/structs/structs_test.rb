@@ -27,9 +27,9 @@ class StructsTest < Minitest::Test
     assert_equal :pending, conversations_repo.by_pk(c.id).status
   end
 
-  def test_status_1_processing
+  def test_status_1_live
     c = Factory[:conversation, status: 1]
-    assert_equal :processing, conversations_repo.by_pk(c.id).status
+    assert_equal :live, conversations_repo.by_pk(c.id).status
   end
 
   def test_status_2_completed

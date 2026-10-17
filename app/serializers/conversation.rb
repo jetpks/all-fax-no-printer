@@ -20,7 +20,13 @@ module Space
             status: conversation.status,
             published: conversation.published,
             turns_count: conversation.turns_count,
-            owned: conversation.owned_by?(viewer)
+            owned: conversation.owned_by?(viewer),
+            agent_role: conversation.agent_role,
+            agent_name: conversation.agent_name,
+            model: conversation.model,
+            original_cwd: conversation.original_cwd,
+            space_id: conversation.space_id,
+            updated_at: conversation.updated_at&.utc&.iso8601(6)
           }
         end
 
@@ -40,6 +46,10 @@ module Space
             original_cwd: conversation.original_cwd,
             git_branch: conversation.git_branch,
             agent_version: conversation.agent_version,
+            agent_role: conversation.agent_role,
+            agent_name: conversation.agent_name,
+            model: conversation.model,
+            space_id: conversation.space_id,
             can_manage: owner,
             owner: {
               username: conversation.user.username,

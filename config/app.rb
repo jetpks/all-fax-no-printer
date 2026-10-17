@@ -43,7 +43,7 @@ module Space
       # Setting ROUTER_PARSED_BODY here short-circuits _params for these routes
       # only, leaving rack.input untouched for incremental reads/streaming.
       IngestBodyPassthrough = Class.new do
-        RAW_BODY_ROUTES = %r{\A/runs/\d+/ingest\z}
+        RAW_BODY_ROUTES = %r{\A/conversations/ingest\z}
 
         def initialize(app) = @app = app
 
@@ -118,7 +118,7 @@ module Space
       # explicitly anyway so the JSON contract is legible here rather than resting on
       # that implicit default, and so its position relative to IngestBodyPassthrough is
       # pinned rather than incidental. Placed AFTER IngestBodyPassthrough: that
-      # middleware pre-sets ROUTER_PARSED_BODY for /runs/:id/ingest, and BodyParser's
+      # middleware pre-sets ROUTER_PARSED_BODY for /conversations/ingest, and BodyParser's
       # own `call` short-circuits whenever that key is already present — so the ingest
       # stream is skipped by construction, not by content-type (application/x-ndjson)
       # alone.

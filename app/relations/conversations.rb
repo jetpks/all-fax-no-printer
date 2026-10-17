@@ -4,7 +4,7 @@ module Space
   module Server
     module Relations
       class Conversations < Space::Server::DB::Relation
-        STATUS_MAP    = { 0 => :pending, 1 => :processing, 2 => :completed, 3 => :failed }.freeze
+        STATUS_MAP    = { 0 => :pending, 1 => :live, 2 => :completed, 3 => :failed }.freeze
         STATUS_TO_INT = STATUS_MAP.invert.freeze
         STATUS_READ   = ROM::Types::Symbol.constructor { |v| STATUS_MAP.fetch(v.to_i) }
 
@@ -13,6 +13,7 @@ module Space
 
           associations do
             belongs_to :user
+            belongs_to :space
             has_many :messages, view: :ordered_by_position
           end
         end

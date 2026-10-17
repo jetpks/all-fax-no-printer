@@ -8,7 +8,6 @@ module Space
           associations do
             belongs_to :space
             has_many :artifacts
-            has_many :runs
           end
         end
       end

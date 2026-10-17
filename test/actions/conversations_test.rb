@@ -18,7 +18,7 @@ class ConversationsActionTest < Minitest::Test
   end
 
   def test_index_returns_200_inertia_page
-    status, headers, body = inertia_get("/")
+    status, headers, body = inertia_get("/conversations")
     assert_equal 200, status
     assert_equal "application/json", headers["content-type"]
     assert_equal "true", headers["x-inertia"]
@@ -30,7 +30,7 @@ class ConversationsActionTest < Minitest::Test
   def test_index_returns_only_published_conversations_for_anon
     Factory[:conversation, published: true]
     Factory[:conversation, published: false]
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     conversations = data["props"]["conversations"]
     assert_equal 1, conversations.length
@@ -57,7 +57,7 @@ class ConversationsActionTest < Minitest::Test
     connection = Space::Server::App["db.gateway"].connection
     spy = SqlSpy.new
     connection.loggers << spy
-    inertia_get("/")
+    inertia_get("/conversations")
     connection.loggers.delete(spy)
 
     message_queries = spy.statements.select { |sql| sql.include?(%(FROM "messages")) }
@@ -69,7 +69,7 @@ class ConversationsActionTest < Minitest::Test
 
   def test_index_pagination_default_page_1_capped_with_prop
     55.times { Factory[:conversation, published: true] }
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     assert_equal 50, data.dig("props", "conversations").length
     assert_equal({ "page" => 1, "has_more" => true }, data.dig("props", "pagination"))
@@ -77,7 +77,7 @@ class ConversationsActionTest < Minitest::Test
 
   def test_index_pagination_page_2_returns_remaining_rows
     55.times { |i| Factory[:conversation, published: true, updated_at: Time.now - i] }
-    _, _, body = inertia_get("/", params: { page: 2 })
+    _, _, body = inertia_get("/conversations", params: { page: 2 })
     data = parse_json(body)
     assert_equal 5, data.dig("props", "conversations").length
     assert_equal({ "page" => 2, "has_more" => false }, data.dig("props", "pagination"))
@@ -85,14 +85,14 @@ class ConversationsActionTest < Minitest::Test
 
   def test_index_pagination_invalid_page_defaults_to_1
     Factory[:conversation, published: true]
-    _, _, body = inertia_get("/", params: { page: "abc" })
+    _, _, body = inertia_get("/conversations", params: { page: "abc" })
     assert_equal({ "page" => 1, "has_more" => false }, parse_json(body).dig("props", "pagination"))
   end
 
   def test_index_orders_by_updated_at_desc
     older = Factory[:conversation, published: true, updated_at: Time.now - 3600, created_at: Time.now - 7200]
     newer = Factory[:conversation, published: true, updated_at: Time.now, created_at: Time.now - 100]
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     ids = parse_json(body)["props"]["conversations"].map { |c| c["id"] }
     assert_equal [newer.id, older.id], ids
   end
@@ -106,7 +106,7 @@ class ConversationsActionTest < Minitest::Test
     connection = Space::Server::App["db.gateway"].connection
     spy = SqlSpy.new
     connection.loggers << spy
-    inertia_get("/", params: { page: 2 })
+    inertia_get("/conversations", params: { page: 2 })
     connection.loggers.delete(spy)
 
     message_queries = spy.statements.select { |sql| sql.include?(%(FROM "messages")) }
@@ -115,7 +115,7 @@ class ConversationsActionTest < Minitest::Test
   end
 
   def test_conversations_path_returns_index_component
-    status1, _, body1 = inertia_get("/")
+    status1, _, body1 = inertia_get("/conversations")
     status2, _, body2 = inertia_get("/conversations")
     assert_equal 200, status1
     assert_equal 200, status2

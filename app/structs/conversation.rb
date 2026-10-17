@@ -8,6 +8,11 @@ module Space
       # messages association is accessed un-combined; that is the intentional safe
       # failure mode.
       class Conversation < ::Space::Server::DB::Struct
+        def pending?    = status == :pending
+        def live?       = status == :live
+        def completed?  = status == :completed
+        def failed?     = status == :failed
+
         def published?
           !!published
         end

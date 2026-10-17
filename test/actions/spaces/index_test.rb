@@ -8,67 +8,72 @@ class SpacesIndexTest < Minitest::Test
   def setup
     setup_db
     OmniAuth.config.test_mode = true
-    @owner = Factory[:user, github_uid: "i07-index-owner-uid", username: "i07-index-owner"]
+    @owner = Factory[:user, github_uid: "i08-index-owner-uid", username: "i08-index-owner"]
   end
 
   def teardown
     OmniAuth.config.mock_auth[:github] = :csrf_detected
   end
 
-  # ── git_utc_offset (AC-3) ──────────────────────────────────────────────────────
+  # ── conversations_count / last_activity_at (AC: Spaces/Index feed) ────────────
 
-  def test_index_space_row_includes_git_utc_offset_key
+  def test_index_space_row_includes_feed_keys
     sign_in(@owner)
     Factory[:space, user_id: @owner.id, slug: "idx-offset-key-space"]
 
     _, _, body = inertia_get("/spaces")
     space_row = parse_json(body)["props"]["spaces"].first
 
-    assert space_row.key?("git_utc_offset"), "space row must include git_utc_offset key"
+    %w[conversations_count last_activity_at].each do |key|
+      assert space_row.key?(key), "space row must include '#{key}' key"
+    end
   end
 
-  def test_index_space_row_git_utc_offset_nil_by_default
+  def test_index_space_row_feed_keys_zero_and_nil_by_default
     sign_in(@owner)
     Factory[:space, user_id: @owner.id, slug: "idx-offset-nil-space"]
 
     _, _, body = inertia_get("/spaces")
     space_row = parse_json(body)["props"]["spaces"].first
 
-    assert_nil space_row["git_utc_offset"]
+    assert_equal 0,   space_row["conversations_count"]
+    assert_nil        space_row["last_activity_at"]
   end
 
-  def test_index_space_row_git_utc_offset_integer_when_set
+  def test_index_space_row_feed_keys_reflect_conversations
     sign_in(@owner)
-    Factory[:space, user_id: @owner.id, slug: "idx-offset-set-space", git_utc_offset: -21600]
+    space = Factory[:space, user_id: @owner.id, slug: "idx-offset-set-space"]
+    Factory[:conversation, user_id: @owner.id, space_id: space.id,
+            updated_at: Time.parse("2026-06-28T21:32:12.278000Z").utc]
 
     _, _, body = inertia_get("/spaces")
     space_row = parse_json(body)["props"]["spaces"].first
 
-    assert_equal(-21600, space_row["git_utc_offset"])
+    assert_equal 1, space_row["conversations_count"]
+    assert_match(/T21:32:12\.278000/, space_row["last_activity_at"],
+      "last_activity_at must have 6 fractional digits")
   end
 
-  # ── imported_at microsecond precision (AC-3) ───────────────────────────────────
+  # ── unspaced (I08): per-cwd buckets of the viewer's space-less conversations ──
 
-  def test_index_space_row_imported_at_nil_when_not_set
+  def test_index_unspaced_prop_present_and_array
     sign_in(@owner)
-    Factory[:space, user_id: @owner.id, slug: "idx-imported-nil-space"]
-
     _, _, body = inertia_get("/spaces")
-    space_row = parse_json(body)["props"]["spaces"].first
-
-    assert space_row.key?("imported_at"), "space row must include imported_at key"
-    assert_nil space_row["imported_at"]
+    props = parse_json(body)["props"]
+    assert props.key?("unspaced"), "spaces index props must include 'unspaced'"
+    assert_kind_of Array, props["unspaced"]
   end
 
-  def test_index_space_row_imported_at_microsecond_precision_when_set
+  def test_index_unspaced_buckets_carry_cwd_counts_and_last_activity
     sign_in(@owner)
-    t = Time.parse("2026-06-28T21:32:12.278000Z").utc
-    Factory[:space, user_id: @owner.id, slug: "idx-imported-micro-space", imported_at: t]
+    Factory[:conversation, user_id: @owner.id, space_id: nil,
+            original_cwd: "/Users/eric/unspaced-proj", updated_at: Time.now]
 
     _, _, body = inertia_get("/spaces")
-    space_row = parse_json(body)["props"]["spaces"].first
+    bucket = parse_json(body)["props"]["unspaced"].first
 
-    assert_match(/T\d\d:\d\d:\d\d\.\d{6}/, space_row["imported_at"],
-      "imported_at must have 6 fractional digits")
+    assert_equal "/Users/eric/unspaced-proj", bucket["cwd"]
+    assert_equal 1, bucket["conversations_count"]
+    assert bucket.key?("last_activity_at")
   end
 end

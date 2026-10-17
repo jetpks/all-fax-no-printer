@@ -1,13 +1,14 @@
 # frozen_string_literal: true
 
 require_relative "support"
-require "space/server/runs/persistor"
+require "space/server/conversations/persistor"
 
 # Duck-typed stand-ins for Persistor's repo dependencies — no DB, since this
 # file's support.rb boots the normalizer standalone (no Hanami/ROM).
 class FakePiConversationsRepo
-  Conv = Struct.new(:id, :user_id, :source)
+  Conv = Struct.new(:id, :user_id, :source, :title, :model, :turns_count)
   def create(user_id:, source:, **) = Conv.new(1, user_id, source)
+  def update(id, attrs) = nil
 end
 
 class FakePiMessagesRepo
@@ -30,7 +31,7 @@ class PiTest < Minitest::Test
   test "streaming session: exact event-type sequence" do
     events = parse_fixture("pi_streaming_session.jsonl")
     assert_equal(
-      [:run_init,
+      [:session_init,
        :message_start, :block_open, :text_delta, :block_close, :message_complete,
        :message_start, :block_open, :text_delta, :block_close,
        :block_open, :text_delta, :block_close,
@@ -42,11 +43,11 @@ class PiTest < Minitest::Test
     )
   end
 
-  test "streaming session: run_init fields from the session header" do
+  test "streaming session: session_init fields from the session header" do
     events   = parse_fixture("pi_streaming_session.jsonl")
-    run_init = events.find { |e| e[:type] == :run_init }
-    assert_equal "pi-stream-1",                run_init[:session_id]
-    assert_equal "/tmp/pi-stream-project",     run_init[:cwd]
+    session_init = events.find { |e| e[:type] == :session_init }
+    assert_equal "pi-stream-1",                session_init[:session_id]
+    assert_equal "/tmp/pi-stream-project",     session_init[:cwd]
   end
 
   test "streaming session: opening user prompt is persisted as a leading user message" do
@@ -155,14 +156,14 @@ class PiTest < Minitest::Test
 
   test "tree-format session log: only the header produces an event" do
     events = parse_fixture("pi_session.jsonl")
-    assert_equal [:run_init], events.map { |e| e[:type] }
+    assert_equal [:session_init], events.map { |e| e[:type] }
   end
 
-  test "tree-format session log: header still yields run_init fields" do
+  test "tree-format session log: header still yields session_init fields" do
     events   = parse_fixture("pi_session.jsonl")
-    run_init = events.first
-    assert_equal "pi-sess-1",        run_init[:session_id]
-    assert_equal "/tmp/pi-project",  run_init[:cwd]
+    session_init = events.first
+    assert_equal "pi-sess-1",        session_init[:session_id]
+    assert_equal "/tmp/pi-project",  session_init[:cwd]
   end
 
   # ── direct record tests: agent_end / agent_settled dedupe ─────────────────
@@ -219,7 +220,7 @@ class PiTest < Minitest::Test
     record = { "type" => "session", "version" => 3, "id" => "abc", "cwd" => "/tmp" }
     events = parser.process(record)
     assert_equal 1, events.length
-    assert_equal :run_init, events.first[:type]
+    assert_equal :session_init, events.first[:type]
   end
 
   test "unknown line types produce no events" do
@@ -233,8 +234,8 @@ class PiTest < Minitest::Test
 
     conversations_repo = FakePiConversationsRepo.new
     messages_repo       = FakePiMessagesRepo.new
-    persistor = Space::Server::Runs::Persistor.new(conversations_repo, messages_repo)
-    persistor.setup(Struct.new(:user_id).new(1))
+    persistor = Space::Server::Conversations::Persistor.new(conversations_repo, messages_repo)
+    persistor.setup(conversations_repo.create(user_id: 1, source: "pi"))
     events.each { |e| persistor.process(e) }
 
     rows = messages_repo.rows

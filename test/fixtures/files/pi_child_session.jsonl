@@ -1,0 +1,8 @@
+{"type":"session","version":3,"id":"pi-child-1","timestamp":"2026-06-13T11:00:00.000Z","cwd":"/Users/eric/architect/spaces/20261014-all-fax-no-printer"}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"user","content":[],"timestamp":1781343000000}}
+{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"builder subagent: fold the runs table"}],"timestamp":1781343000400}}
+{"type":"message_start","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"openrouter","model":"minimax/minimax-m3","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1781343000500}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Runs table dropped; conversations carry the payload."}],"api":"openai-completions","provider":"openrouter","model":"minimax/minimax-m3","usage":{"input":20,"output":10,"cacheRead":0,"cacheWrite":0,"totalTokens":30,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1781343000600}}
+{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"Runs table dropped; conversations carry the payload."}],"api":"openai-completions","provider":"openrouter","model":"minimax/minimax-m3","usage":{"input":20,"output":10,"cacheRead":0,"cacheWrite":0,"totalTokens":30,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1781343000600},"toolResults":[]}
