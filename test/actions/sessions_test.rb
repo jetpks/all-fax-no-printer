@@ -2,6 +2,7 @@
 
 require_relative "action_test_helper"
 require "omniauth"
+require "time"
 
 class SessionsActionTest < Minitest::Test
   include ActionTestHelper
@@ -152,6 +153,40 @@ class SessionsActionTest < Minitest::Test
     status, headers, _ = post("/auth/github/callback")
     assert_equal 302, status
     assert_match %r{\A/auth/failure}, headers["location"]
+  end
+
+  # Persistent session cookie (BRIEF §1 phone-first): the sign-in cookie must
+  # carry a non-empty expires= attribute consistent with SESSION_EXPIRE_AFTER,
+  # so iOS Safari keeps it across lock/tab-discard instead of bouncing hourly.
+  def test_sign_in_issues_persistent_session_cookie
+    _, headers, _ = mock_callback
+
+    set_cookie = headers["set-cookie"]
+    refute_nil set_cookie, "Login must issue a session cookie"
+    entry = set_cookie.split("\n").find do |cookie|
+      cookie.start_with?("_space_server_session=") && cookie.include?("expires=")
+    end
+    refute_nil entry, "Sign-in Set-Cookie must carry an expires= attribute: #{set_cookie.inspect}"
+
+    expires = Time.httpdate(entry[/expires=([^;]+)/i, 1])
+    assert_in_delta Time.now + Space::Server::SESSION_EXPIRE_AFTER, expires, 300
+  end
+
+  # Post-logout session authenticates as nobody: capture the renewed logout
+  # cookie, replay it on a gated route, and expect the anonymous
+  # require_login bounce (302 → "/").
+  def test_logout_cookie_authenticates_as_nobody
+    _, login_headers, _ = mock_callback
+    @session_cookie = login_headers["set-cookie"]&.split(";")&.first
+    refute_nil @session_cookie, "Login must issue a session cookie"
+
+    _, logout_headers, _ = get("/logout")
+    @session_cookie = logout_headers["set-cookie"]&.split(";")&.first
+    refute_nil @session_cookie, "Logout must issue a renewed session cookie"
+
+    status, headers, _ = get("/api_tokens")
+    assert_equal 302, status
+    assert_equal "/", headers["location"]
   end
 
   # G5 — no dev_auth_user bypass in architect app/ sources
