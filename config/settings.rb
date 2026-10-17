@@ -8,9 +8,6 @@ module Space
       setting :github_client_id, default: nil
       setting :github_client_secret, default: nil
 
-      setting :ingest_token,   default: nil
-      setting :ingest_user_id, default: nil, constructor: ->(v) { Integer(v) if v }
-
       # Transport security — production values via ENV/credentials (S2 deploy slice).
       # Defaults are dev/test-safe: no redirect lockout, all hosts permitted.
       setting :force_ssl,        default: false, constructor: Types::Params::Bool

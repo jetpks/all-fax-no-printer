@@ -1,5 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react'
-import { LogIn, LogOut, Upload } from 'lucide-react'
+import { LogIn, LogOut } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -27,31 +27,16 @@ export default function Nav() {
 
         <nav className="flex items-center gap-3">
           <Button asChild variant="ghost" size="sm">
-            <Link href="/runs">Runs</Link>
+            <Link href="/spaces">Spaces</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/conversations">Conversations</Link>
           </Button>
 
           {current_user ? (
             <>
               <Button asChild variant="ghost" size="sm">
-                <Link href="/jobs">Jobs</Link>
-              </Button>
-
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/profiles">Profiles</Link>
-              </Button>
-
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/api_tokens">API Keys</Link>
-              </Button>
-
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/providers">Providers</Link>
-              </Button>
-
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/conversations/new">
-                  <Upload className="size-4" /> Upload
-                </Link>
+                <Link href="/api_tokens">Api Tokens</Link>
               </Button>
 
               <DropdownMenu>

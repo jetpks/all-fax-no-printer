@@ -24,20 +24,9 @@ redis_url: "redis://localhost:6379/0"
 job_env_base_image: "space-claude-base:v1"
 
 # --- Secrets (op:// refs only — no values committed) ---
-# Same 1Password vault/item as INGEST_TOKEN's default ref (lib/space/server/boot/ingest_token.rb).
-ingest_token_ref: "op://ansible/space-architect-server/ingest-token"
 session_secret_ref: "op://ansible/space-architect-server/session-secret"
 github_client_id_ref: "op://ansible/space-architect-server/github-client-id"
 github_client_secret_ref: "op://ansible/space-architect-server/github-client-secret"
-
-# --- Ingest owner user ---
-# The operator's real GitHub uid (I35 operator decision 2026-07-21): on a
-# single-operator box, bearer-ingested data belongs to the operator, so
-# owner-scoped pages show it. run-server.sh resolves INGEST_USER_ID from this
-# at boot (the row exists via OAuth sign-in). seeds.rb still idempotently
-# creates the legacy "ingest-service-account" row; it just no longer owns
-# ingested data.
-ingest_user_github_uid: "952830"
 
 # --- Apple container ---
 container_label: com.slushsystems.container

@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Head, Link, router, usePage } from '@inertiajs/react'
-import { MessageSquarePlus } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Head, Link, router } from '@inertiajs/react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,7 +13,8 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import AnnotationSection from '@/components/AnnotationSection'
+import ConversationStream from '@/components/ConversationStream'
+import type { SSEState } from '@/lib/sse-reducer'
 import { isEncryptedThinking } from '@/lib/tools'
 import {
   buildCommandPairs,
@@ -24,32 +24,29 @@ import {
   isAbsorbed,
 } from '@/lib/message-pairing'
 import { parseAnchor, turnMessages } from '@/lib/anchors'
-import { annotatedMessageIds, annotationsFor, indexAnnotations } from '@/lib/annotation-index'
-import SelectionAnnotator from '@/components/SelectionAnnotator'
-import NotesColumn from '@/components/NotesColumn'
-import ShareDialog from '@/components/ShareDialog'
 import Turn from '@/components/Turn'
 import TurnToc from '@/components/TurnToc'
 import AppLayout from '@/layouts/AppLayout'
-import { targetCandidates } from '@/lib/note-margin'
-import { setDraftHighlight } from '@/lib/highlight-registry'
-import { useMediaQuery } from '@/lib/use-media-query'
 import type {
-  Annotation,
   Conversation,
-  NoteTarget,
   Round as RoundType,
-  Share,
-  SharedProps,
   Turn as TurnType,
 } from '@/types'
 
 type Props = {
   conversation: Conversation
   turns: TurnType[]
-  annotations: Annotation[]
-  // Access grants — serialized only to the owner, null for everyone else.
-  shares: Share[] | null
+}
+
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+
+// The four capture statuses from the conversations contract — mirrored by
+// Conversations/Index's map for the list rows.
+const STATUS_VARIANT: Record<string, BadgeVariant> = {
+  pending: 'outline',
+  live: 'default',
+  completed: 'secondary',
+  failed: 'destructive',
 }
 
 // A subtle, distinct background tint per turn, cycled by index via the golden
@@ -63,18 +60,12 @@ function turnColor(index: number): string {
   return `hsl(${hue} var(--turn-band-s) var(--turn-band-l))`
 }
 
-export default function Show({ conversation, turns, annotations, shares }: Props) {
-  const { current_user } = usePage<SharedProps>().props
-  // Compose affordances key on note access, not on being signed in — published
-  // conversations are read-only for everyone but the owner and note grantees.
-  const canNote = !!current_user && conversation.can_note
-  // On wide screens notes live in a third column beside the conversation (the
-  // center column is *for the conversation*); narrower, they fall back to the
-  // inline sections under their targets. The comment rail outranks the turn
-  // TOC as width shrinks — it appears at lg while the TOC rail waits for xl
-  // (the "Jump to turn…" disclosure covers the gap). Must match the `lg:`
-  // grid breakpoint.
-  const marginNotes = useMediaQuery('(min-width: 1024px)')
+export default function Show({ conversation, turns }: Props) {
+  // A capture still landing (ingest mouth not yet terminal) streams in below —
+  // the banner is the page-level signal; the badge is per-row.
+  const isLiveCapture = conversation.status === 'pending' || conversation.status === 'live'
+  const [streamStatus, setStreamStatus] = useState<SSEState['status']>('pending')
+
   // Stable across renders so it's a stable prop for the memoized Turn (and the
   // TOC), not a fresh Map every time activeTurns ticks during a scroll.
   const turnColors = useMemo(
@@ -175,24 +166,26 @@ export default function Show({ conversation, turns, annotations, shares }: Props
 
   // These indices are a pure function of the props, so memoize them — otherwise
   // every activeTurns tick while scrolling recomputed all of them. They also feed
-  // the memoized Turn as stable props.
-  const annotationIndex = useMemo(() => indexAnnotations(annotations), [annotations])
-  const annotatedIds = useMemo(() => annotatedMessageIds(annotations), [annotations])
+  // the memoized Turn as stable props. The annotation anchors of the old notes
+  // tier are gone, so the pairing/fold rules below see an always-empty set — the
+  // same empty set the frozen Spaces pages pass.
+  const emptyAnnotatedIds = useMemo(() => new Set<number>(), [])
   const messages = useMemo(() => turns.flatMap(turnMessages), [turns])
   const toolResults = useMemo(() => buildToolResultIndex(messages), [messages])
   const commandPairs = useMemo(() => buildCommandPairs(messages), [messages])
   const folded = useMemo(
-    () => buildFoldedIndex(messages, toolResults, commandPairs.foldedByCommandId, annotatedIds),
-    [messages, toolResults, commandPairs, annotatedIds],
+    () =>
+      buildFoldedIndex(messages, toolResults, commandPairs.foldedByCommandId, emptyAnnotatedIds),
+    [messages, toolResults, commandPairs, emptyAnnotatedIds],
   )
 
   // A turn renders the server's rounds minus the messages whose content is
   // already shown inline elsewhere (paired tool results, absorbed command
   // stdout) or is just the model's encrypted chain-of-thought (opaque
-  // ciphertext, nothing to read) — unless the message anchors an annotation or
-  // is a published snippet. The round *partition* is the server's; only
-  // visibility is decided here. Precomputed per turn so each Turn gets a stable
-  // rounds array rather than a fresh filter() each render.
+  // ciphertext, nothing to read) — unless it's a published snippet. The round
+  // *partition* is the server's; only visibility is decided here. Precomputed
+  // per turn so each Turn gets a stable rounds array rather than a fresh
+  // filter() each render.
   const visibleRounds = useMemo(() => {
     const visible = (turn: TurnType): RoundType[] =>
       turn.rounds
@@ -200,15 +193,15 @@ export default function Show({ conversation, turns, annotations, shares }: Props
           anchor_id: round.anchor_id,
           messages: round.messages.filter((m) => {
             // Its own reason to stay overrides every fold rule below.
-            if (hasOwnReason(m, annotatedIds)) return true
+            if (hasOwnReason(m, emptyAnnotatedIds)) return true
             if (commandPairs.absorbedIds.has(m.id)) return false
             if (isEncryptedThinking(m)) return false
-            return !isAbsorbed(m, toolResults, annotatedIds)
+            return !isAbsorbed(m, toolResults, emptyAnnotatedIds)
           }),
         }))
         .filter((round) => round.messages.length > 0)
     return new Map(turns.map((t) => [t.anchor_id, visible(t)]))
-  }, [turns, toolResults, commandPairs, annotatedIds])
+  }, [turns, toolResults, commandPairs, emptyAnnotatedIds])
 
   // Owning turn per message id — how a deep link to a round/tool/message finds
   // the turn that must reveal it.
@@ -217,79 +210,6 @@ export default function Show({ conversation, turns, annotations, shares }: Props
     for (const turn of turns) for (const m of turnMessages(turn)) map.set(m.id, turn.anchor_id)
     return map
   }, [turns])
-
-  // Owning round per message id — the margin's mid-precision fallback when a
-  // note's exact target is folded away (see lib/note-margin targetCandidates).
-  const roundByMessageId = useMemo(() => {
-    const map = new Map<number, number>()
-    for (const turn of turns)
-      for (const round of turn.rounds)
-        for (const m of round.messages) map.set(m.id, round.anchor_id)
-    return map
-  }, [turns])
-
-  // ---- The notes margin ----
-  // What's being composed (a target descriptor, set by any "Add note"
-  // affordance in the transcript) renders as a composer card in the margin,
-  // level with its target. One compose at a time; retargeting replaces it.
-  const [composing, setComposing] = useState<NoteTarget | null>(null)
-  const compose = useCallback((target: NoteTarget) => setComposing(target), [])
-  const endCompose = useCallback(() => setComposing(null), [])
-  // The margin is the only home for the composer — leaving it (resize) or
-  // finishing clears the draft selection highlight along with the state.
-  useEffect(() => {
-    if (!marginNotes) setComposing(null)
-  }, [marginNotes])
-  useEffect(() => {
-    if (!composing) setDraftHighlight(null)
-  }, [composing])
-  const onCompose = marginNotes ? compose : undefined
-
-  const ownersOf = useCallback(
-    (anchorId: number | null) => ({
-      round: anchorId != null ? roundByMessageId.get(anchorId) : undefined,
-      turn: anchorId != null ? turnByMessageId.get(anchorId) : undefined,
-    }),
-    [roundByMessageId, turnByMessageId],
-  )
-  // Per-note DOM-id candidate chains the margin aligns cards against.
-  const noteCandidates = useMemo(
-    () =>
-      new Map(annotations.map((a) => [a.id, targetCandidates(a, ownersOf(a.anchor_message_id))])),
-    [annotations, ownersOf],
-  )
-  const composeState = useMemo(
-    () =>
-      composing && {
-        target: composing,
-        candidates: targetCandidates(composing, ownersOf(composing.anchor_message_id)),
-      },
-    [composing, ownersOf],
-  )
-
-  // Clicking a margin note jumps the transcript to its target — the same
-  // reveal/scroll/flash path the TOC and deep links ride.
-  const jumpToNote = useCallback(
-    (note: Annotation) => {
-      if (note.target_kind === 'conversation') {
-        document
-          .getElementById('conversation')
-          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        return
-      }
-      const id = note.anchor_message_id
-      if (id == null) return
-      const turnAnchor = note.target_kind === 'turn' ? id : turnByMessageId.get(id)
-      if (turnAnchor == null) return
-      if (note.target_kind === 'turn') jumpTo(turnAnchor)
-      else jumpTo(turnAnchor, `${note.target_kind}-${id}`, id)
-    },
-    [turnByMessageId, jumpTo],
-  )
-
-  // The center column, observed by the margin so cards track fold reflows.
-  const centerRef = useRef<HTMLDivElement>(null)
-  const showMargin = marginNotes && (annotations.length > 0 || canNote)
 
   // Honor an entity address arriving in the URL fragment (#turn-12, #round-34,
   // #tool-56, #message-78, or a marker) — on first paint and on later hash
@@ -324,11 +244,10 @@ export default function Show({ conversation, turns, annotations, shares }: Props
   }
 
   return (
-    <AppLayout mainClassName={showMargin ? 'max-w-6xl xl:max-w-[88rem]' : 'max-w-6xl'}>
+    <AppLayout mainClassName="max-w-6xl">
       <Head title={conversation.title} />
-      <SelectionAnnotator conversationId={conversation.id} onCompose={onCompose} />
 
-      <details className={`mb-4 ${showMargin ? 'xl:hidden' : 'lg:hidden'}`}>
+      <details className="mb-4 lg:hidden">
         <summary className="cursor-pointer text-sm text-muted-foreground">Jump to turn…</summary>
         <div className="mt-3">
           <TurnToc
@@ -341,16 +260,8 @@ export default function Show({ conversation, turns, annotations, shares }: Props
         </div>
       </details>
 
-      <div
-        className={
-          // With the margin up, lg gets center + comment rail and the TOC rail
-          // joins at xl; without it, lg gets TOC + center as ever.
-          showMargin
-            ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_19rem] lg:gap-8 xl:grid-cols-[14rem_minmax(0,1fr)_19rem]'
-            : 'lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8'
-        }
-      >
-        <aside className={showMargin ? 'hidden xl:block' : 'hidden lg:block'}>
+      <div className="lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8">
+        <aside className="hidden lg:block">
           <div className="sticky top-6">
             <TurnToc
               turns={turns}
@@ -363,7 +274,7 @@ export default function Show({ conversation, turns, annotations, shares }: Props
           </div>
         </aside>
 
-        <div className="min-w-0" ref={centerRef}>
+        <div className="min-w-0">
           <header id="conversation" className="mb-4 scroll-mt-20 border-b border-border pb-4">
             <h1 className="text-2xl font-bold">{conversation.title}</h1>
             {conversation.parent && (
@@ -375,8 +286,12 @@ export default function Show({ conversation, turns, annotations, shares }: Props
               </p>
             )}
             <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-              {conversation.status} · {turns.length} turns
+              <Badge variant={STATUS_VARIANT[conversation.status] ?? 'outline'}>
+                {conversation.status}
+              </Badge>
+              {turns.length} turns
               {conversation.published && <Badge variant="secondary">published</Badge>}
+              {isLiveCapture && streamStatus === 'live' && <span>· streaming</span>}
             </p>
 
             <dl className="mt-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 text-xs text-muted-foreground">
@@ -390,31 +305,12 @@ export default function Show({ conversation, turns, annotations, shares }: Props
               )}
             </dl>
 
-            {(conversation.can_manage || (canNote && marginNotes)) && (
+            {conversation.can_manage && (
               <div className="mt-3 flex gap-2">
-                {canNote && marginNotes && (
-                  // The margin's conversation-level trigger — the inline section
-                  // below carries its own when notes render inline instead.
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      compose({
-                        target_kind: 'conversation',
-                        anchor_message_id: null,
-                      })
-                    }
-                  >
-                    <MessageSquarePlus /> Add note
-                  </Button>
-                )}
-                {conversation.can_manage && (
-                  <>
-                    <ShareDialog conversationId={conversation.id} shares={shares ?? []} />
-                    <Button size="sm" onClick={togglePublish}>
-                      {conversation.published ? 'Unpublish' : 'Publish whole conversation'}
-                    </Button>
-                    <AlertDialog>
+                <Button size="sm" onClick={togglePublish}>
+                  {conversation.published ? 'Unpublish' : 'Publish whole conversation'}
+                </Button>
+                <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button size="sm" variant="destructive">
                           Delete
@@ -437,8 +333,6 @@ export default function Show({ conversation, turns, annotations, shares }: Props
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
-                  </>
-                )}
               </div>
             )}
           </header>
@@ -448,28 +342,31 @@ export default function Show({ conversation, turns, annotations, shares }: Props
               <h2 className="text-sm font-semibold text-muted-foreground">Subagent transcripts</h2>
               <ul className="mt-2 divide-y divide-border">
                 {conversation.children.map((child) => (
-                  <li key={child.id} className="py-1.5">
+                  <li key={child.id} className="flex items-center gap-2 py-1.5">
                     <Link href={`/conversations/${child.id}`} className="text-sm hover:underline">
                       {child.title}
                     </Link>
+                    {child.agent_role && (
+                      <Badge variant="outline" className="text-xs">
+                        {child.agent_role}
+                      </Badge>
+                    )}
                   </li>
                 ))}
               </ul>
             </section>
           )}
 
-          {!marginNotes && (
-            <AnnotationSection
-              annotations={annotationsFor(annotationIndex, 'conversation', null)}
-              conversationId={conversation.id}
-              target={{ target_kind: 'conversation', anchor_message_id: null }}
-            />
-          )}
-
-          {(conversation.status === 'pending' || conversation.status === 'processing') && (
-            <p className="mt-4 text-sm text-muted-foreground">
-              Import in progress — refresh in a moment.
-            </p>
+          {isLiveCapture && (
+            <div data-testid="live-capture" className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm text-muted-foreground">
+                Live — this capture is still landing; its messages stream in below.
+              </p>
+              <ConversationStream
+                conversationId={conversation.id}
+                onStatusChange={setStreamStatus}
+              />
+            </div>
           )}
 
           <ol className="mt-4 space-y-3">
@@ -481,7 +378,6 @@ export default function Show({ conversation, turns, annotations, shares }: Props
                 prompt={turn.prompt}
                 rounds={visibleRounds.get(turn.anchor_id) ?? []}
                 conversationId={conversation.id}
-                annotations={annotationIndex}
                 toolResults={toolResults}
                 commandStdout={commandPairs.stdoutByMessageId}
                 folded={folded}
@@ -493,25 +389,10 @@ export default function Show({ conversation, turns, annotations, shares }: Props
                 color={turnColors.get(turn.anchor_id) ?? 'transparent'}
                 projectRoot={conversation.original_cwd}
                 owner={conversation.owner}
-                onCompose={onCompose}
               />
             ))}
           </ol>
         </div>
-
-        {showMargin && (
-          <aside className="hidden lg:block">
-            <NotesColumn
-              notes={annotations}
-              conversationId={conversation.id}
-              candidates={noteCandidates}
-              composing={composeState}
-              onComposeEnd={endCompose}
-              onSelect={jumpToNote}
-              contentRef={centerRef}
-            />
-          </aside>
-        )}
       </div>
     </AppLayout>
   )

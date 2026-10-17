@@ -14,15 +14,19 @@ module Space
         module_function
 
         def conversation_list_json(conversation, viewer:)
-          owned = conversation.owned_by?(viewer)
           {
             id: conversation.id,
             title: display_title(conversation),
             status: conversation.status,
             published: conversation.published,
             turns_count: conversation.turns_count,
-            owned: owned,
-            shared: !owned && conversation.shared_with?(viewer, access: :view)
+            owned: conversation.owned_by?(viewer),
+            agent_role: conversation.agent_role,
+            agent_name: conversation.agent_name,
+            model: conversation.model,
+            original_cwd: conversation.original_cwd,
+            space_id: conversation.space_id,
+            updated_at: conversation.updated_at&.utc&.iso8601(6)
           }
         end
 
@@ -42,8 +46,11 @@ module Space
             original_cwd: conversation.original_cwd,
             git_branch: conversation.git_branch,
             agent_version: conversation.agent_version,
+            agent_role: conversation.agent_role,
+            agent_name: conversation.agent_name,
+            model: conversation.model,
+            space_id: conversation.space_id,
             can_manage: owner,
-            can_note: conversation.annotatable_by?(viewer),
             owner: {
               username: conversation.user.username,
               name: conversation.user.name,
@@ -55,19 +62,9 @@ module Space
             end
 
             unless children.equal?(NOT_PROVIDED)
-              json[:children] = children.to_a.map { |c| { id: c.id, title: display_title(c), session_id: c.session_id } }
+              json[:children] = children.to_a.map { |c| { id: c.id, title: display_title(c), session_id: c.session_id, agent_role: c.agent_role } }
             end
           end
-        end
-
-        def share_json(share)
-          {
-            id: share.id,
-            grantee_kind: share.grantee_kind,
-            github_login: share.github_login,
-            access: share.access,
-            avatar_url: "https://avatars.githubusercontent.com/u/#{share.github_id}"
-          }
         end
 
         def turns_for(conversation, owner:)
@@ -101,20 +98,6 @@ module Space
             published: message.published,
             blocks: message.blocks,
             can_publish: owner
-          }
-        end
-
-        def annotation_json(annotation, viewer:)
-          {
-            id: annotation.id,
-            body: annotation.body,
-            author: annotation.user.username,
-            author_avatar_url: annotation.user.avatar_url,
-            can_delete: annotation.user_id == viewer&.id,
-            target_kind: annotation.target_kind,
-            anchor_message_id: annotation.anchor_message_id,
-            tool_use_id: annotation.tool_use_id,
-            selector: annotation.selector
           }
         end
 

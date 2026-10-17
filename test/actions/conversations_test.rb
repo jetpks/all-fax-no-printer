@@ -2,7 +2,7 @@
 
 require_relative "action_test_helper"
 
-# Basic contract tests for conversations index/show/create and sessions.
+# Basic contract tests for conversations index/show/publish/destroy and sessions.
 # All render paths use inertia_get (X-Inertia) for hermetic, manifest-free tests.
 class ConversationsActionTest < Minitest::Test
   include ActionTestHelper
@@ -17,36 +17,8 @@ class ConversationsActionTest < Minitest::Test
     OmniAuth.config.mock_auth[:github] = :csrf_detected
   end
 
-  def fixture_path(name)
-    File.join(__dir__, "..", "fixtures", "files", name)
-  end
-
-  # Build a multipart/form-data request body for a single file field.
-  def multipart_post(path, file_path, filename)
-    boundary = "TestBoundary#{SecureRandom.hex(4)}"
-    file_content = File.binread(file_path)
-    crlf = "\r\n"
-    body = "--#{boundary}#{crlf}" \
-           "Content-Disposition: form-data; name=\"conversation[source_file]\"; filename=\"#{filename}\"#{crlf}" \
-           "Content-Type: application/octet-stream#{crlf}" \
-           "#{crlf}" \
-           "#{file_content}#{crlf}" \
-           "--#{boundary}--#{crlf}"
-
-    env = Rack::MockRequest.env_for(
-      path,
-      "REQUEST_METHOD" => "POST",
-      "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}",
-      input: body
-    )
-    env["HTTP_COOKIE"] = @session_cookie if @session_cookie
-    app.call(env)
-  end
-
-  # --- conversations.index (GET /) ---
-
   def test_index_returns_200_inertia_page
-    status, headers, body = inertia_get("/")
+    status, headers, body = inertia_get("/conversations")
     assert_equal 200, status
     assert_equal "application/json", headers["content-type"]
     assert_equal "true", headers["x-inertia"]
@@ -58,7 +30,7 @@ class ConversationsActionTest < Minitest::Test
   def test_index_returns_only_published_conversations_for_anon
     Factory[:conversation, published: true]
     Factory[:conversation, published: false]
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     conversations = data["props"]["conversations"]
     assert_equal 1, conversations.length
@@ -85,7 +57,7 @@ class ConversationsActionTest < Minitest::Test
     connection = Space::Server::App["db.gateway"].connection
     spy = SqlSpy.new
     connection.loggers << spy
-    inertia_get("/")
+    inertia_get("/conversations")
     connection.loggers.delete(spy)
 
     message_queries = spy.statements.select { |sql| sql.include?(%(FROM "messages")) }
@@ -97,7 +69,7 @@ class ConversationsActionTest < Minitest::Test
 
   def test_index_pagination_default_page_1_capped_with_prop
     55.times { Factory[:conversation, published: true] }
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     assert_equal 50, data.dig("props", "conversations").length
     assert_equal({ "page" => 1, "has_more" => true }, data.dig("props", "pagination"))
@@ -105,7 +77,7 @@ class ConversationsActionTest < Minitest::Test
 
   def test_index_pagination_page_2_returns_remaining_rows
     55.times { |i| Factory[:conversation, published: true, updated_at: Time.now - i] }
-    _, _, body = inertia_get("/", params: { page: 2 })
+    _, _, body = inertia_get("/conversations", params: { page: 2 })
     data = parse_json(body)
     assert_equal 5, data.dig("props", "conversations").length
     assert_equal({ "page" => 2, "has_more" => false }, data.dig("props", "pagination"))
@@ -113,14 +85,14 @@ class ConversationsActionTest < Minitest::Test
 
   def test_index_pagination_invalid_page_defaults_to_1
     Factory[:conversation, published: true]
-    _, _, body = inertia_get("/", params: { page: "abc" })
+    _, _, body = inertia_get("/conversations", params: { page: "abc" })
     assert_equal({ "page" => 1, "has_more" => false }, parse_json(body).dig("props", "pagination"))
   end
 
   def test_index_orders_by_updated_at_desc
     older = Factory[:conversation, published: true, updated_at: Time.now - 3600, created_at: Time.now - 7200]
     newer = Factory[:conversation, published: true, updated_at: Time.now, created_at: Time.now - 100]
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     ids = parse_json(body)["props"]["conversations"].map { |c| c["id"] }
     assert_equal [newer.id, older.id], ids
   end
@@ -134,7 +106,7 @@ class ConversationsActionTest < Minitest::Test
     connection = Space::Server::App["db.gateway"].connection
     spy = SqlSpy.new
     connection.loggers << spy
-    inertia_get("/", params: { page: 2 })
+    inertia_get("/conversations", params: { page: 2 })
     connection.loggers.delete(spy)
 
     message_queries = spy.statements.select { |sql| sql.include?(%(FROM "messages")) }
@@ -143,7 +115,7 @@ class ConversationsActionTest < Minitest::Test
   end
 
   def test_conversations_path_returns_index_component
-    status1, _, body1 = inertia_get("/")
+    status1, _, body1 = inertia_get("/conversations")
     status2, _, body2 = inertia_get("/conversations")
     assert_equal 200, status1
     assert_equal 200, status2
@@ -165,7 +137,6 @@ class ConversationsActionTest < Minitest::Test
     assert_equal "Conversations/Show", data["component"]
     assert_equal conv.id, data["props"]["conversation"]["id"]
     assert data["props"].key?("turns"), "props must include turns"
-    assert data["props"].key?("annotations"), "props must include annotations"
   end
 
   def test_show_redirects_302_for_anon_on_private_conv
@@ -188,14 +159,12 @@ class ConversationsActionTest < Minitest::Test
     assert data["props"].key?("turns")
   end
 
-  def test_show_includes_can_note_and_can_manage_in_props
+  def test_show_includes_can_manage_in_props
     sign_in(@owner)
     conv = Factory[:conversation, published: false, user_id: @owner.id]
     _, _, body = inertia_get("/conversations/#{conv.id}")
     data = parse_json(body)
-    assert data["props"]["conversation"].key?("can_note"),   "props.conversation must include can_note"
     assert data["props"]["conversation"].key?("can_manage"), "props.conversation must include can_manage"
-    assert_equal true, data["props"]["conversation"]["can_note"]
     assert_equal true, data["props"]["conversation"]["can_manage"]
   end
 
@@ -203,13 +172,16 @@ class ConversationsActionTest < Minitest::Test
     sign_in(@owner)
     parent = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-parent"]
     conv = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-child", parent_session_id: "sess-parent"]
-    child = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-grandchild", parent_session_id: "sess-child"]
+    child = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-grandchild", parent_session_id: "sess-child", agent_role: "builder"]
 
     _, _, body = inertia_get("/conversations/#{conv.id}")
     data = parse_json(body)
     assert_equal parent.id, data["props"]["conversation"]["parent"]["id"]
     assert_equal [child.id], data["props"]["conversation"]["children"].map { |c| c["id"] }
     assert_equal "sess-grandchild", data["props"]["conversation"]["children"].first["session_id"]
+    # The frozen seam's children json: {id, title, session_id, agent_role} —
+    # the deck lane's Show page badges children by agent_role.
+    assert_equal "builder", data["props"]["conversation"]["children"].first["agent_role"]
   end
 
   def test_show_omits_parent_and_children_keys_for_non_owner
@@ -256,86 +228,6 @@ class ConversationsActionTest < Minitest::Test
     data = parse_json(body)
     assert data.key?("error")
   end
-
-  # --- conversations.create ---
-
-  def test_create_redirects_anon_with_flash
-    status, headers, _ = post("/conversations", params: { "conversation" => { "source_file" => "x.jsonl" } })
-    assert_equal 302, status
-    assert_equal "/", headers["location"]
-    flash = flash_from_redirect(headers)
-    assert_equal "Please sign in to continue.", flash["alert"]
-  end
-
-  def test_create_redirects_to_new_with_errors_for_invalid_params
-    sign_in(@owner)
-    status, headers, _ = post("/conversations", params: { "conversation" => "not_a_hash" })
-    assert_equal 302, status
-    assert_equal "/conversations/new", headers["location"]
-    redirect_cookie = headers["set-cookie"]&.split(";")&.first
-    _, _, body = inertia_get("/conversations/new", cookie: redirect_cookie)
-    data = parse_json(body)
-    refute_empty data.dig("props", "errors"), "props.errors must be non-empty after contract failure"
-  end
-
-  # G4: missing source_file → flat error, no row persisted
-  # Send an empty string for source_file (encodes as conversation[source_file]=)
-  # so the outer conversation key IS present but source_file fails .filled check.
-  def test_create_missing_source_file_returns_flat_error
-    sign_in(@owner)
-    status, headers, _ = post("/conversations", params: { "conversation" => { "source_file" => "" } })
-    assert_equal 302, status
-    assert_equal "/conversations/new", headers["location"]
-
-    redirect_cookie = headers["set-cookie"]&.split(";")&.first
-    _, _, body = inertia_get("/conversations/new", cookie: redirect_cookie)
-    data = parse_json(body)
-    errors = data.dig("props", "errors")
-    refute_empty errors
-    assert errors.key?("source_file"), "errors must have top-level source_file key (flat shape), got: #{errors.inspect}"
-
-    # No row persisted
-    assert_equal 0, Space::Server::App["db.gateway"].connection[:conversations].count,
-      "No conversation must be persisted on missing source_file"
-  end
-
-  # G4: valid multipart POST → persists conversation, enqueues job, redirects with flash
-  # The action is frozen (Hanami singleton), so we stub the processor object in the
-  # container (same reference as action's @import_queue) rather than the action instance.
-  def test_create_success_persists_enqueues_and_redirects
-    sign_in(@owner)
-
-    # Ensure the provider is started so we can get a reference to the processor
-    processor = Space::Server::App["import_queue"]
-    recorded_jobs = []
-
-    # Stub the processor's call method — same object the action holds in @import_queue
-    processor.stub(:call, ->(job) { recorded_jobs << job }) do
-      status, headers, _ = multipart_post("/conversations",
-                                          fixture_path("transcript.jsonl"),
-                                          "transcript.jsonl")
-
-      assert_equal 302, status, "Expected redirect after successful create"
-      assert_match %r{/conversations/\d+}, headers["location"], "Expected redirect to /conversations/:id"
-
-      flash = flash_from_redirect(headers)
-      assert_equal "Uploaded — importing now.", flash["notice"]
-
-      # Job was enqueued with the new conversation id
-      assert_equal 1, recorded_jobs.size
-      conv_id = headers["location"][/\d+/].to_i
-      assert_equal({ "conversation_id" => conv_id }, recorded_jobs.first)
-
-      # Conversation persisted with correct user_id, source_file_data, pending status
-      conv = Space::Server::Repos::ConversationsRepo.new.by_pk(conv_id)
-      refute_nil conv, "Conversation must be persisted"
-      assert_equal @owner.id, conv.user_id
-      refute_nil conv.source_file_data, "source_file_data must be present"
-      assert_equal :pending, conv.status, "status must be pending"
-    end
-  end
-
-  # --- conversations.publish + conversations.destroy flash parity (L1-G1) ---
 
   def test_publish_unpublished_notice_says_published
     conv = Factory[:conversation, user_id: @owner.id, published: false]

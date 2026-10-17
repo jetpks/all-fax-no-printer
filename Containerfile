@@ -4,7 +4,7 @@
 # workers in one supervised falcon topology (bin/serve → falcon.rb).
 #
 # No secrets are baked in: everything arrives at runtime via environment
-# (DATABASE_URL, REDIS_URL, SESSION_SECRET, INGEST_TOKEN, ...). Production
+# (DATABASE_URL, REDIS_URL, SESSION_SECRET, ...). Production
 # never wires the credentials key — config/credentials.yml.enc stays inert.
 
 # ── Stage 1: frontend assets (vite build; node is build-time only) ──────────
@@ -59,7 +59,7 @@ ENV HANAMI_ENV=production \
     RACK_ENV=production \
     FALCON_BIND=http://0.0.0.0:3000
 EXPOSE 3000
-# bin/serve resolves INGEST_TOKEN from ENV (pass-through when set) and execs
-# the supervised topology. Migrations run by overriding the command:
+# bin/serve execs the supervised topology. Migrations run by overriding the
+# command:
 #   bundle exec hanami db prepare
 CMD ["./bin/serve"]

@@ -49,23 +49,12 @@ export type TargetKind = 'conversation' | 'turn' | 'prompt' | 'round' | 'tool' |
 
 // A W3C-style TextQuoteSelector marking a passage of one message's *rendered*
 // text: the quoted text plus ~32 chars of context either side, and the char
-// offset it sat at when captured (a tie-break hint, not an address). Re-anchored
-// at render time by searching the rendered text — see lib/text-anchor.
+// offset it sat at when captured (a tie-break hint, not an address).
 export type Selector = {
   exact: string
   prefix: string
   suffix: string
   position: number
-}
-
-// What a new note will attach to — the target descriptor POSTed alongside the
-// body. Every level of the hierarchy (conversation, turn, prompt, round, tool,
-// message, or a text range within one) is the same shape with a different kind.
-export type NoteTarget = {
-  target_kind: TargetKind
-  anchor_message_id: number | null
-  tool_use_id?: string | null
-  selector?: Selector | null
 }
 
 export type Annotation = {
@@ -115,7 +104,13 @@ export type ConversationListItem = {
   published: boolean
   turns_count: number
   owned: boolean
-  shared: boolean
+  // Role tag stamped at ingest (architect/builder/judge/…); null = interactive.
+  agent_role: string | null
+  agent_name: string | null
+  model: string | null
+  original_cwd: string | null
+  space_id: number | null
+  updated_at: string
 }
 
 export type Conversation = {
@@ -128,9 +123,6 @@ export type Conversation = {
   git_branch: string | null
   agent_version: string | null
   can_manage: boolean
-  // Owner or note-grantee. Viewing never implies noting — published
-  // conversations are read-only for the world.
-  can_note: boolean
   // Whose conversation this is — the identity stamped on every prompt.
   owner: {
     username: string
@@ -142,39 +134,14 @@ export type Conversation = {
   parent?: { id: number; title: string } | null
   // Owner-only: subagent transcripts synced from this conversation. Absent
   // for non-owners and anonymous viewers; empty array when there are none.
-  children?: Array<{ id: number; title: string; session_id: string }>
-}
-
-// The five states in config/db/migrate/20260622000000_create_runs.rb's status
-// column (0=pending, 1=live, 2=complete, 3=failed, 4=canceled).
-export type RunStatus = 'pending' | 'live' | 'complete' | 'failed' | 'canceled'
-
-export type Run = {
-  id: number
-  status: RunStatus
-  published: boolean
-  role: string | null
-  harness: string | null
+  children?: Array<{ id: number; title: string; session_id: string; agent_role: string | null }>
+  // Role tag stamped at ingest (architect/builder/judge/…); null = interactive.
+  agent_role: string | null
+  agent_name: string | null
   model: string | null
-  producer: string | null
-  created_at: string
-  updated_at: string
-  // Owner-only: the job that produced this run (null for ingested runs and
-  // non-owner viewers).
-  job: { id: number; status: string; prompt: string } | null
-}
-
-export type RunListItem = {
-  id: number
-  status: RunStatus
-  published: boolean
-  harness: string | null
-  model: string | null
-  lane: string | null
-  created_at: string
-  // Owner-gated first ~140 chars of the originating job's prompt; nil for
-  // non-owners, anon viewers, and runs with no job (ingested runs).
-  prompt_snippet: string | null
+  // The space this capture was filed under via the ingest mouth's space-slug
+  // header; null → grouped by working directory instead.
+  space_id: number | null
 }
 
 // The `?page=N` cursor a list page received alongside its row prop, capped at
@@ -182,68 +149,6 @@ export type RunListItem = {
 export type Pagination = {
   page: number
   has_more: boolean
-}
-
-export type JobListItem = {
-  id: number
-  status: string
-  model: string
-  harness: string | null
-  prompt_snippet: string | null
-  created_at: string
-  run_id: number | null
-  provenance?: { space: string; iteration: string; lane: string }
-}
-
-export type HarnessSpec = {
-  type: string
-  model: string
-  backend: { base_url: string; api_key_ref?: string | null }
-  args?: string[]
-}
-
-export type EnvironmentSpec = {
-  env?: Record<string, string>
-  secrets?: { ref: string; name: string }[]
-  deps?: string[]
-  debs?: string[]
-  npm?: string[]
-  gems?: string[]
-  mise?: string[]
-  files?: { path: string; content_b64: string }[]
-  permissions?: { network?: boolean; mounts?: string[] }
-}
-
-// The v1 job spec surface (see app/contracts/create_job.rb).
-export type JobSpec = {
-  harness: HarnessSpec
-  prompt: string
-  environment: EnvironmentSpec
-}
-
-export type JobDetail = {
-  id: number
-  status: string
-  attempts: number
-  run_id: number | null
-  spec: JobSpec
-  created_at: string
-  updated_at: string
-}
-
-// A stored partial job spec (see app/contracts/create_profile.rb): harness +
-// environment, no prompt. Jobs/New prefills its form from one; it never
-// carries a prompt of its own.
-export type ProfileSpec = {
-  harness: HarnessSpec
-  environment: EnvironmentSpec
-}
-
-export type Profile = {
-  id: number
-  name: string
-  harness_type: string
-  spec: ProfileSpec
 }
 
 // A per-user machine-auth credential (minted at /api_tokens/new). The
@@ -263,50 +168,34 @@ export type MintedApiToken = {
   secret: string
 }
 
-// An inference backend jobs and profiles can target. flavors names the wire
-// protocols it speaks (see lib/providers REQUIRED_FLAVOR).
-export type Provider = {
-  id: number
-  name: string
-  base_url: string
-  api_key_ref: string | null
-  flavors: string[]
-}
-
-// A pi extension file generated from a provider row + its live model list.
-// env_key is set only for key-bearing providers (see lib/providers fetchPiExtension).
-export type PiExtension = {
-  path: string
-  content: string
-  env_key: string | null
-}
-
-// Wraps GET /providers/:id/pi_extension — the frozen {extension, error} shape
-// at HTTP 200 both ways.
-export type PiExtensionResponse = {
-  extension: PiExtension | null
-  error: string | null
-}
-
-// An access grant on a conversation: a GitHub user, or every member of a
-// GitHub organization. Serialized only to the owner.
-export type Share = {
-  id: number
-  grantee_kind: 'user' | 'org'
-  github_login: string
-  access: 'view' | 'note'
-  avatar_url: string
-}
-
 export type SpaceListItem = {
   id: number
   slug: string
   title: string
   status: string
   iterations_count: number
-  runs_count: number
-  imported_at: string
-  git_utc_offset?: number | null
+  conversations_count: number
+  // May be null — a space with no captured activity yet.
+  last_activity_at: string | null
+}
+
+// A viewer's space-less conversations bucketed by original working directory
+// (the Spaces index's "Unspaced" section).
+export type UnspacedBucket = {
+  cwd: string
+  conversations_count: number
+  last_activity_at: string | null
+}
+
+// A conversation row on the Spaces show timeline.
+export type SpaceConversation = {
+  id: number
+  title: string
+  agent_role: string | null
+  agent_name: string | null
+  status: string
+  model: string | null
+  updated_at: string
 }
 
 export type SpaceArtifact = {
@@ -324,18 +213,6 @@ export type SpaceArtifactDetail = {
   raw: string
 }
 
-export type SpaceRun = {
-  id: number
-  lane: string
-  role: string
-  status: string
-  conversation_id: number
-  iteration_id?: number
-  created_at?: string
-  harness?: string | null
-  model?: string | null
-}
-
 export type SpaceIteration = {
   id: number
   ordinal: number
@@ -347,32 +224,6 @@ export type SpaceIteration = {
   occurred_at_utc_offset?: number | null
   decisions?: { name: string; body: string }[]
   artifacts: SpaceArtifact[]
-  runs: SpaceRun[]
-}
-
-export type ArchitectRun = {
-  id: number
-  role: string
-  status: string
-  session_id: string | null
-  conversation_id: number | null
-  created_at: string
-  occurred_at?: string | null
-  has_transcript?: boolean
-  turns?: Turn[]
-  harness?: string | null
-  model?: string | null
-}
-
-export type SpaceRunDetail = {
-  id: number
-  lane: string
-  role: string
-  status: string
-  producer: string | null
-  session_id: string | null
-  iteration_id: number | null
-  conversation_id: number | null
 }
 
 export type Space = {

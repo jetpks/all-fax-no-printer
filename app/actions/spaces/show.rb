@@ -14,7 +14,6 @@ module Space
             "repos.spaces_repo",
             "repos.iterations_repo",
             "repos.artifacts_repo",
-            "repos.runs_repo",
             "repos.conversations_repo"
           ]
 
@@ -31,10 +30,9 @@ module Space
 
             iterations = iterations_repo.for_space(space.id)
             artifacts  = artifacts_repo.for_space(space.id)
-            runs       = runs_repo.for_space(space.id)
+            conversations = conversations_repo.for_space(space.id)
 
             iter_artifacts = artifacts.group_by(&:iteration_id)
-            iter_runs      = runs.select { |r| r.iteration_id }.group_by(&:iteration_id)
 
             iterations_props = iterations.map do |iter|
               {
@@ -47,19 +45,9 @@ module Space
                 occurred_at:            iter.occurred_at&.iso8601(6),
                 occurred_at_utc_offset: iter.occurred_at_utc_offset,
                 decisions:              decisions_for(iter, iter_artifacts),
-                artifacts:              Array(iter_artifacts[iter.id]).map { |a| artifact_props(a) },
-                runs:                   Array(iter_runs[iter.id]).map { |r| run_props(r) }
+                artifacts:              Array(iter_artifacts[iter.id]).map { |a| artifact_props(a) }
               }
             end
-
-            orphan_runs     = runs.select { |r| r.iteration_id.nil? }
-            architect_runs  = orphan_runs
-              .select { |r| r.role.to_s == "architect" }
-              .sort_by(&:created_at)
-              .map { |r| architect_run_props(r, user) }
-            unassigned_runs = orphan_runs
-              .reject { |r| r.role.to_s == "architect" }
-              .map { |r| run_props(r) }
 
             other_artifacts = artifacts.select { |a| a.iteration_id.nil? }
                                        .map { |a| artifact_props(a) }
@@ -74,8 +62,7 @@ module Space
                 git_utc_offset: space.git_utc_offset
               },
               iterations:      iterations_props,
-              architect_runs:  architect_runs,
-              unassigned_runs: unassigned_runs,
+              conversations:   conversations.map { |c| conversation_props(c) },
               other_artifacts: other_artifacts
             })
           end
@@ -97,23 +84,9 @@ module Space
             { id: a.id, kind: a.kind, path: a.path, title: a.title }
           end
 
-          def run_props(r)
-            { id: r.id, lane: r.lane, role: r.role, status: r.status.to_s,
-              conversation_id: r.conversation_id, created_at: r.created_at.iso8601(6),
-              harness: r.harness, model: r.model }
-          end
-
-          def architect_run_props(r, user)
-            conversation = r.conversation_id &&
-                           conversations_repo.with_messages(r.conversation_id)
-            turns = Serializers::Conversation.turns_for(conversation, owner: r.owned_by?(user))
-            { id: r.id, role: r.role, status: r.status.to_s,
-              session_id: r.session_id, conversation_id: r.conversation_id,
-              created_at: r.created_at.iso8601(6),
-              occurred_at: r.occurred_at&.iso8601(6),
-              has_transcript: !r.conversation_id.nil?,
-              turns: turns,
-              harness: r.harness, model: r.model }
+          def conversation_props(c)
+            { id: c.id, title: c.title, agent_role: c.agent_role, agent_name: c.agent_name,
+              status: c.status, model: c.model, updated_at: c.updated_at&.utc&.iso8601(6) }
           end
         end
       end

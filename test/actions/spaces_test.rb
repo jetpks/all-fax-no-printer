@@ -10,6 +10,7 @@ class SpacesTest < Minitest::Test
     OmniAuth.config.test_mode = true
     @owner = Factory[:user, github_uid: "spaces-owner-uid", username: "spaces-owner"]
     @other = Factory[:user, github_uid: "spaces-other-uid", username: "spaces-other"]
+    @other_user = @other
   end
 
   def teardown
@@ -57,12 +58,54 @@ class SpacesTest < Minitest::Test
     Factory[:space, user_id: @owner.id, slug: "prop-check", status: "active"]
     _, _, body = inertia_get("/spaces")
     space = parse_json(body)["props"]["spaces"].first
-    %w[id slug title status iterations_count runs_count imported_at].each do |key|
+    %w[id slug title status iterations_count conversations_count last_activity_at].each do |key|
       assert space.key?(key), "spaces props must include '#{key}'"
     end
     assert_equal "active", space["status"]
     assert_equal 0,        space["iterations_count"]
-    assert_equal 0,        space["runs_count"]
+    assert_equal 0,        space["conversations_count"]
+    assert_nil             space["last_activity_at"]
+  end
+
+  def test_index_space_counts_and_last_activity_reflect_conversations
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "conv-stats-space"]
+    Factory[:conversation, user_id: @owner.id, space_id: space.id,
+            updated_at: Time.parse("2026-06-28T21:32:12.278000Z").utc]
+
+    _, _, body = inertia_get("/spaces")
+    space_row = parse_json(body)["props"]["spaces"].first
+    assert_equal 1, space_row["conversations_count"]
+    assert_match(/T21:32:12\.278000/, space_row["last_activity_at"])
+  end
+
+  # ── unspaced (I08): space-less conversations bucketed by original_cwd ─────────
+
+  def test_index_unspaced_buckets_viewer_conversations_by_cwd
+    sign_in(@owner)
+    Factory[:conversation, user_id: @owner.id, space_id: nil,
+            original_cwd: "/Users/eric/proj-a", updated_at: Time.now - 60]
+    Factory[:conversation, user_id: @owner.id, space_id: nil,
+            original_cwd: "/Users/eric/proj-a", updated_at: Time.now]
+    Factory[:conversation, user_id: @owner.id, space_id: nil,
+            original_cwd: "/Users/eric/proj-b"]
+    Factory[:conversation, user_id: @other_user.id, space_id: nil,
+            original_cwd: "/Users/eric/foreign"]
+
+    _, _, body = inertia_get("/spaces")
+    unspaced = parse_json(body)["props"]["unspaced"]
+    buckets = unspaced.to_h { |b| [b["cwd"], b] }
+
+    assert_equal 2, buckets["/Users/eric/proj-a"]["conversations_count"]
+    assert_equal 1, buckets["/Users/eric/proj-b"]["conversations_count"]
+    refute buckets.key?("/Users/eric/foreign"), "other users' unspaced conversations are invisible"
+    assert buckets["/Users/eric/proj-a"].key?("last_activity_at")
+  end
+
+  def test_index_unspaced_empty_for_anonymous_without_published
+    Factory[:conversation, user_id: @owner.id, space_id: nil, original_cwd: "/private"]
+    _, _, body = inertia_get("/spaces")
+    assert_equal [], parse_json(body)["props"]["unspaced"]
   end
 
   # ── Show ─────────────────────────────────────────────────────────────────────
@@ -106,22 +149,22 @@ class SpacesTest < Minitest::Test
     assert space_data.key?("repos")
   end
 
-  def test_show_returns_iterations_unassigned_runs_other_artifacts
+  def test_show_returns_iterations_conversations_other_artifacts
     sign_in(@owner)
     space = Factory[:space, user_id: @owner.id, slug: "full-space"]
     _, _, body = inertia_get("/spaces/#{space.id}")
     props = parse_json(body)["props"]
-    assert props.key?("iterations"),      "must include iterations"
-    assert props.key?("unassigned_runs"), "must include unassigned_runs"
+    assert props.key?("iterations"),    "must include iterations"
+    assert props.key?("conversations"), "must include conversations"
     assert props.key?("other_artifacts"), "must include other_artifacts"
     assert_kind_of Array, props["iterations"]
-    assert_kind_of Array, props["unassigned_runs"]
+    assert_kind_of Array, props["conversations"]
     assert_kind_of Array, props["other_artifacts"]
   end
 
-  def test_show_includes_iterations_with_artifacts_and_runs
+  def test_show_iterations_props_carry_no_runs_key
     sign_in(@owner)
-    space    = Factory[:space,     user_id: @owner.id, slug: "iter-space"]
+    space = Factory[:space,     user_id: @owner.id, slug: "iter-space"]
     iter     = Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-one"]
     artifact = Factory[:artifact,  space_id: space.id, iteration_id: iter.id,
                        kind: "iteration", path: "arch/I01.md", title: "I01"]
@@ -131,6 +174,7 @@ class SpacesTest < Minitest::Test
     assert_equal 1,       iterations.length
     assert_equal iter.id, iterations.first["id"]
     assert_equal 1,       iterations.first["ordinal"]
+    refute iterations.first.key?("runs"), "iteration props must not include a runs array (runs died)"
 
     arts = iterations.first["artifacts"]
     assert_equal 1,           arts.length

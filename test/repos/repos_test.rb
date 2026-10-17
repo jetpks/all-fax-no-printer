@@ -11,7 +11,7 @@ class ReposTest < Minitest::Test
   def setup
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :artifacts, :spaces, :users].each do |t|
+    [:messages, :conversations, :artifacts, :spaces, :users].each do |t|
       conn[t].delete
     end
   end
@@ -19,8 +19,6 @@ class ReposTest < Minitest::Test
   def users_repo        = Space::Server::Repos::UsersRepo.new
   def conversations_repo = Space::Server::Repos::ConversationsRepo.new
   def messages_repo     = Space::Server::Repos::MessagesRepo.new
-  def annotations_repo  = Space::Server::Repos::AnnotationsRepo.new
-  def shares_repo       = Space::Server::Repos::ConversationSharesRepo.new
 
   def make_user(overrides = {})
     Factory[:user, **overrides]
@@ -183,17 +181,12 @@ class ReposTest < Minitest::Test
 
   def test_conversations_delete_cascades_children
     conv = make_conversation
-    user = make_user
     Factory[:message, conversation_id: conv.id, position: 1]
-    Factory[:annotation, conversation_id: conv.id, user_id: user.id]
-    Factory[:conversation_share, conversation_id: conv.id]
 
     conversations_repo.delete(conv.id)
 
     assert_nil conversations_repo.by_pk(conv.id)
     assert_empty messages_repo.for_conversation(conv.id)
-    assert_empty annotations_repo.for_conversation(conv.id)
-    assert_empty shares_repo.for_conversation(conv.id)
   end
 
   # --- MessagesRepo --------------------------------------------------------
@@ -235,66 +228,6 @@ class ReposTest < Minitest::Test
     found   = messages_repo.by_pk(msg.id)
     assert_kind_of Array, found.content
     assert_equal blocks, found.content
-  end
-
-  # --- AnnotationsRepo -----------------------------------------------------
-
-  def test_annotations_crud_round_trip
-    conv = make_conversation
-    user = make_user
-    ann = Factory[:annotation, conversation_id: conv.id, user_id: user.id]
-    assert_kind_of Integer, ann.id
-    found = annotations_repo.by_pk(ann.id)
-    refute_nil found
-    annotations_repo.update(ann.id, body: "Updated body")
-    assert_equal "Updated body", annotations_repo.by_pk(ann.id).body
-    annotations_repo.delete(ann.id)
-    assert_nil annotations_repo.by_pk(ann.id)
-  end
-
-  def test_annotations_for_conversation_finder
-    conv1 = make_conversation
-    conv2 = make_conversation
-    user  = make_user
-    a1 = Factory[:annotation, conversation_id: conv1.id, user_id: user.id]
-    a2 = Factory[:annotation, conversation_id: conv2.id, user_id: user.id]
-    ids = annotations_repo.for_conversation(conv1.id).map(&:id)
-    assert_includes ids, a1.id
-    refute_includes ids, a2.id
-  end
-
-  def test_annotations_selector_jsonb_round_trips
-    conv = make_conversation
-    user = make_user
-    sel  = { "exact" => "hello", "prefix" => "say ", "suffix" => " world" }
-    ann  = Factory[:annotation, conversation_id: conv.id, user_id: user.id, selector: sel]
-    found = annotations_repo.by_pk(ann.id)
-    assert_kind_of Hash, found.selector
-    assert_equal sel, found.selector
-  end
-
-  # --- ConversationSharesRepo ----------------------------------------------
-
-  def test_conversation_shares_crud_round_trip
-    conv  = make_conversation
-    share = Factory[:conversation_share, conversation_id: conv.id]
-    assert_kind_of Integer, share.id
-    found = shares_repo.by_pk(share.id)
-    refute_nil found
-    shares_repo.update(share.id, access: "note")
-    assert_equal "note", shares_repo.by_pk(share.id).access
-    shares_repo.delete(share.id)
-    assert_nil shares_repo.by_pk(share.id)
-  end
-
-  def test_conversation_shares_for_conversation_finder
-    conv1 = make_conversation
-    conv2 = make_conversation
-    s1 = Factory[:conversation_share, conversation_id: conv1.id]
-    s2 = Factory[:conversation_share, conversation_id: conv2.id]
-    ids = shares_repo.for_conversation(conv1.id).map(&:id)
-    assert_includes ids, s1.id
-    refute_includes ids, s2.id
   end
 
   # --- G5: factory wired —— persists + in-memory structs ------------------

@@ -13,7 +13,7 @@ ENV["HANAMI_ENV"] ||= "test"
 require "hanami/boot"
 require "rack/mock"
 
-INERTIA_GET_PATHS = %w[/ /conversations /conversations/new /conversations/1].freeze
+INERTIA_GET_PATHS = %w[/ /spaces /conversations /conversations/1].freeze
 
 def smoke_call(verb, path)
   env = Rack::MockRequest.env_for(path, "REQUEST_METHOD" => verb)
@@ -36,19 +36,17 @@ ANON_ROUTES = [
   ["DELETE", "/logout"],
   ["GET",    "/"],
   ["GET",    "/conversations"],
+  # Spaces (private — owner-only; anon/stranger → redirect, never 5xx)
+  ["GET",    "/spaces/1"],
+  ["GET",    "/spaces/1/artifacts/1"],
   # Auth-required routes — anon → 401, not 5xx
-  ["GET",    "/conversations/new"],
-  ["POST",   "/conversations"],
   ["GET",    "/conversations/1"],
+  ["GET",    "/conversations/1/stream"],
+  ["POST",   "/conversations/ingest"],
   ["PATCH",  "/conversations/1/publish"],
   ["DELETE", "/conversations/1"],
-  ["POST",   "/conversations/1/annotations"],
-  ["DELETE", "/annotations/1"],
-  ["POST",   "/conversations/1/shares"],
-  ["PATCH",  "/conversations/1/shares/2"],
-  ["DELETE", "/conversations/1/shares/2"],
-  ["GET",    "/conversations/1/entities/turn-42"],
   ["PATCH",  "/messages/1/publish"],
+  ["GET",    "/api_tokens"],
 ].freeze
 
 ANON_ROUTES.each do |verb, path|
@@ -76,24 +74,16 @@ end
 
 # Auth-required write endpoints must return 401 for anon (not 5xx, not 200)
 AUTH_REQUIRED = [
-  ["GET",    "/conversations/new"],
-  ["POST",   "/conversations"],
   ["PATCH",  "/conversations/1/publish"],
   ["DELETE", "/conversations/1"],
-  ["POST",   "/conversations/1/annotations"],
-  ["DELETE", "/annotations/1"],
-  ["POST",   "/conversations/1/shares"],
-  ["PATCH",  "/conversations/1/shares/2"],
-  ["DELETE", "/conversations/1/shares/2"],
   ["PATCH",  "/messages/1/publish"],
 ].freeze
 
 AUTH_REQUIRED.each do |verb, path|
   begin
     status, _, _ = smoke_call(verb, path)
-    # 4c-3 inverted guards return 3xx redirects for anon; resource-lookup-first actions
-    # (shares) return 404 against empty DB. The security invariant is: no unauthorized
-    # 200 and no 5xx. Accept any 3xx-4xx.
+    # 4c-3 inverted guards return 3xx redirects for anon. The security invariant
+    # is: no unauthorized 200 and no 5xx. Accept any 3xx-4xx.
     if status == 200 || status >= 500
       failures << "#{verb} #{path} → expected non-200/non-5xx for anon, got #{status}"
     end
