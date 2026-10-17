@@ -14,7 +14,8 @@ module Space
             "repos.spaces_repo",
             "repos.iterations_repo",
             "repos.artifacts_repo",
-            "repos.conversations_repo"
+            "repos.conversations_repo",
+            "repos.messages_repo"
           ]
 
           def handle(req, res)
@@ -63,6 +64,7 @@ module Space
               },
               iterations:      iterations_props,
               conversations:   conversations.map { |c| conversation_props(c) },
+              narrator:        narrator_props(conversations),
               other_artifacts: other_artifacts
             })
           end
@@ -87,6 +89,36 @@ module Space
           def conversation_props(c)
             { id: c.id, title: c.title, agent_role: c.agent_role, agent_name: c.agent_name,
               status: c.status, model: c.model, updated_at: c.updated_at&.utc&.iso8601(6) }
+          end
+
+          # The narrator prop: the space's newest narrator conversation (for_space
+          # is already desc(:updated_at), so the FIRST agent_role match is the
+          # newest — do not re-sort), reduced to the text of its last qualifying
+          # assistant message. Nil when there is no narrator conversation or none
+          # of its assistant messages carries a non-empty text block — the key is
+          # always present either way.
+          def narrator_props(conversations)
+            narrator_conv = conversations.find { |c| c.agent_role == "narrator" }
+            return nil unless narrator_conv
+
+            message = messages_repo.for_conversation(narrator_conv.id).reverse.find { |m| !narrator_text(m).empty? }
+            return nil unless message
+
+            {
+              conversation_id: narrator_conv.id,
+              text:            narrator_text(message).map { |b| b["text"] }.join("\n\n"),
+              updated_at:      narrator_conv.updated_at&.utc&.iso8601(6)
+            }
+          end
+
+          # A message's non-empty text blocks (empty when it has none — the
+          # qualifying predicate and the block source are the same filter).
+          def narrator_text(message)
+            return [] unless message.role == "assistant"
+
+            Array(message.content).select do |block|
+              block.is_a?(Hash) && block["type"] == "text" && !block["text"].to_s.empty?
+            end
           end
         end
       end
