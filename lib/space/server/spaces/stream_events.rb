@@ -59,8 +59,18 @@ module Space
           idx ? fields[idx + 1] : nil
         end
 
+        # looplog 9.5.0 parity (tag_label): known architect agents abbreviate
+        # by their FULL agent name; unknown names clip to 10 chars. ingest
+        # stores agent_name as the full name and agent_role as the name minus
+        # the "architect-" prefix (session-sink agentRoleFor), so both forms
+        # hit the map; a conversation with neither name nor role falls back to
+        # the bare id.
         def tag(conversation_id, agent_role, agent_name)
-          ROLE_ABBREV[agent_role] || agent_name&.to_s&.slice(0, 10) || "conv-#{conversation_id}"
+          name = agent_name.to_s
+          abbrev = ROLE_ABBREV[name] || ROLE_ABBREV["architect-#{agent_role}"]
+          return abbrev if abbrev
+
+          name.empty? ? "conv-#{conversation_id}" : name[0, 10]
         end
 
         # The delivered cursor comparison: the entry is at or before the cursor.

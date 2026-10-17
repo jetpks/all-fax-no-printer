@@ -58,7 +58,7 @@ class SpacesStreamHistoryActionTest < Minitest::Test
     sign_in(@owner)
     space  = Factory[:space, user_id: @owner.id]
     conv_a = Factory[:conversation, user_id: @owner.id, space_id: space.id,
-                     agent_role: "architect-coordinator", agent_name: nil]
+                     agent_role: "coordinator", agent_name: "architect-coordinator"]
     conv_b = Factory[:conversation, user_id: @owner.id, space_id: space.id,
                      agent_role: nil, agent_name: "Navi the Navigator"]
 
@@ -88,8 +88,9 @@ class SpacesStreamHistoryActionTest < Minitest::Test
       # Envelope parity with the SSE stream: id form and merged keys.
       first = json["events"].first
       assert_equal "#{conv_a.id}:#{a_ms}", first["id"]
-      assert_equal "coord", first["data"]["tag"]
-      assert_equal "architect-coordinator", first["data"]["agent_role"]
+      assert_equal "coord", first["data"]["tag"], "prefix-stripped role must still abbreviate"
+      assert_equal "coordinator", first["data"]["agent_role"]
+      assert_equal "architect-coordinator", first["data"]["agent_name"]
     ensure
       redis_client&.close
     end

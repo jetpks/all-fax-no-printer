@@ -124,7 +124,7 @@ class SpacesStreamActionTest < Minitest::Test
     sign_in(@owner)
     space  = Factory[:space, user_id: @owner.id]
     conv_a = Factory[:conversation, user_id: @owner.id, space_id: space.id,
-                    agent_role: "architect-coordinator", agent_name: "Coordinator Prime"]
+                    agent_role: "coordinator", agent_name: "architect-coordinator"]
     conv_b = Factory[:conversation, user_id: @owner.id, space_id: space.id,
                     agent_role: nil, agent_name: "Navi the Navigator"]
     conv_c = Factory[:conversation, user_id: @owner.id, space_id: space.id,
@@ -167,14 +167,18 @@ class SpacesStreamActionTest < Minitest::Test
         assert_kind_of String, data["tag"]
       end
 
-      # Frozen tag map: role abbrev beats truncated name beats conv fallback.
+      # Frozen tag map (looplog 9.5.0 parity): production stores agent_name as
+      # the full agent name and agent_role as the name minus the "architect-"
+      # prefix (session-sink) — either form abbreviates; an unknown name clips
+      # to 10 chars; neither → conv-id fallback.
       by_conversation = events.group_by { |id, _| id.split(":").first }
-      assert_equal "coord", by_conversation[conv_a.id.to_s].first[1]["tag"]
+      assert_equal "coord", by_conversation[conv_a.id.to_s].first[1]["tag"],
+                  "role comes prefix-stripped from ingest — the abbrev must still hit"
       assert_equal "Navi the N", by_conversation[conv_b.id.to_s].first[1]["tag"]
       assert_equal "conv-#{conv_c.id}", by_conversation[conv_c.id.to_s].first[1]["tag"]
       assert_equal conv_a.id, by_conversation[conv_a.id.to_s].first[1]["conversation_id"]
-      assert_equal "architect-coordinator", by_conversation[conv_a.id.to_s].first[1]["agent_role"]
-      assert_equal "Coordinator Prime", by_conversation[conv_a.id.to_s].first[1]["agent_name"]
+      assert_equal "coordinator", by_conversation[conv_a.id.to_s].first[1]["agent_role"]
+      assert_equal "architect-coordinator", by_conversation[conv_a.id.to_s].first[1]["agent_name"]
 
       # Numeric (ms, seq) sort across conversations — string sort is wrong at seq ≥ 10.
       positions = events.map { |id, _| entry_position(id) }
@@ -308,7 +312,7 @@ class SpacesStreamActionTest < Minitest::Test
         # A conversation (and its stream key) created after the mux started.
         sleep 0.3
         conv = Factory[:conversation, user_id: @owner.id, space_id: space.id,
-                       agent_role: "architect-builder", agent_name: "bld-lane", updated_at: Time.now]
+                       agent_role: "builder", agent_name: "architect-builder", updated_at: Time.now]
         key = Space::Server::Conversations::StreamKey.for(conv.id)
         redis_client.del(key)
 
@@ -326,8 +330,8 @@ class SpacesStreamActionTest < Minitest::Test
 
         _, data = event
         assert_equal conv.id, data["conversation_id"]
-        assert_equal "architect-builder", data["agent_role"]
-        assert_equal "bld-lane", data["agent_name"]
+        assert_equal "builder", data["agent_role"]
+        assert_equal "architect-builder", data["agent_name"]
         assert_equal "bld", data["tag"]
       ensure
         redis_client&.close
