@@ -45,6 +45,30 @@ class SchemaTest < Minitest::Test
     assert_match "false",   c[:default].to_s
   end
 
+  # ── I08 schema fold: runs dropped, ingest-mouth metadata added ──────────────
+
+  def test_runs_table_is_gone
+    refute_includes conn.tables, :runs, "the runs table must be dropped (schema fold)"
+  end
+
+  def test_conversations_ingest_mouth_columns
+    assert_equal "bigint", col(:conversations, :space_id)[:db_type]
+    assert_equal true,     col(:conversations, :space_id)[:allow_null]
+    assert_equal "text",   col(:conversations, :agent_role)[:db_type]
+    assert_equal "text",   col(:conversations, :agent_name)[:db_type]
+    assert_equal "text",   col(:conversations, :model)[:db_type]
+
+    applied = col(:conversations, :applied_record_ids)
+    assert_equal "jsonb", applied[:db_type]
+    assert_equal false,   applied[:allow_null]
+    assert_match "[]",    applied[:default].to_s
+  end
+
+  def test_conversations_space_id_indexed
+    idx = conn.indexes(:conversations)
+    assert idx.key?(:index_conversations_on_space_id), "space_id must be indexed"
+  end
+
   def test_messages_content_jsonb_not_null
     c = col(:messages, :content)
     assert_equal "jsonb", c[:db_type]

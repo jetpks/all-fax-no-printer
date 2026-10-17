@@ -115,7 +115,7 @@ module ActionTestHelper
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:artifacts, :iterations, :messages, :conversations, :runs, :spaces, :users].each { |t| conn[t].delete }
+    [:artifacts, :iterations, :messages, :conversations, :spaces, :users].each { |t| conn[t].delete }
   end
 
   # Establish a signed-in session via the real OmniAuth callback stack.

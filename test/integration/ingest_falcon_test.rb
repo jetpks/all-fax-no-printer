@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Real-HTTP integration test for POST /runs/:id/ingest.
+# Real-HTTP integration test for POST /conversations/ingest.
 #
 # Boots an in-process Async::HTTP::Server + Protocol::Rack::Adapter serving the
 # real Space::Server::App (same code path as Falcon in production), so rack.input is
@@ -23,13 +23,13 @@ require "protocol/http/body/buffered"
 Space::Server::App.start(:redis)
 
 # Install once at load time: track Protocol::Rack::Input#read calls whose
-# backtrace is outside Space::Server::Runs::Ingest (i.e. pre-action drains).
+# backtrace is outside Space::Server::Conversations::Ingest (i.e. pre-action drains).
 # Cleared in setup before each test.
 INGEST_FALCON_PRE_ACTION_READS = []
 
 Protocol::Rack::Input.prepend(Module.new do
   def read(*args)
-    unless caller(1, 20).any? { |l| l.include?("runs/ingest") }
+    unless caller(1, 20).any? { |l| l.include?("conversations/ingest") }
       INGEST_FALCON_PRE_ACTION_READS << caller(1, 8).join("\n")
     end
     super
@@ -39,13 +39,22 @@ end)
 class IngestFalconTest < Minitest::Test
   FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"))
   # Expected event count is what the normalizer emits, not raw line count.
-  # Computed once using a noop redis so no side effects at load time.
+  # Computed once using a noop redis + in-memory conversation stand-in so no
+  # side effects land at load time.
   FIXTURE_EVENT_COUNT = begin
     noop = Object.new
     def noop.xadd(*); end
     def noop.expire(*); end
-    Space::Server::Runs::Ingest.new(noop).call(
-      Struct.new(:id).new(0),
+
+    fake_conversations = Object.new
+    def fake_conversations.find_by_session_id(*, **) = nil
+    def fake_conversations.create(**)
+      Struct.new(:id, :session_id, :applied_record_ids).new(1, "pi-stream-1", [])
+    end
+    def fake_conversations.update(*, **) = nil
+
+    Space::Server::Conversations::Ingest.new(noop, conversations_repo: fake_conversations).call(
+      Struct.new(:id).new(1),
       StringIO.new(FIXTURE_JSONL)
     )[:events]
   end
@@ -55,11 +64,9 @@ class IngestFalconTest < Minitest::Test
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :users].each { |t| conn[t].delete }
     @user  = Factory[:user]
-    @run   = Factory[:run, user_id: @user.id, status: 0]
     @redis = Space::Server::App["redis"]
-    Sync { @redis.call("DEL", "run:#{@run.id}") }
     INGEST_FALCON_PRE_ACTION_READS.clear
   end
 
@@ -91,7 +98,7 @@ class IngestFalconTest < Minitest::Test
                 ["authorization", "Bearer #{TOKEN}"]
               ])
               body     = Protocol::HTTP::Body::Buffered.wrap(FIXTURE_JSONL)
-              response = client.post("/runs/#{@run.id}/ingest", headers, body)
+              response = client.post("/conversations/ingest", headers, body)
               raw      = response.read || ""
               response.finish
 
@@ -101,11 +108,14 @@ class IngestFalconTest < Minitest::Test
               assert_equal FIXTURE_EVENT_COUNT, data["events"],
                 "AC5: response events must equal fixture count (#{FIXTURE_EVENT_COUNT})"
 
-              xlen = @redis.call("XLEN", "run:#{@run.id}")
-              # pi never emits run_complete itself; ingest synthesizes the
-              # terminal frame — one stream entry beyond the event count.
-              assert_equal FIXTURE_EVENT_COUNT + 1, xlen,
-                "AC5: Redis XLEN must equal fixture count + synthetic terminal (#{FIXTURE_EVENT_COUNT})"
+              conv = Space::Server::App["repos.conversations_repo"].by_pk(data["id"])
+              key = Space::Server::Conversations::StreamKey.for(conv.id)
+              xlen = Sync { @redis.call("XLEN", key) }
+              # The mouth adds NO synthetic terminal frame without the
+              # X-Session-Complete header — the stream carries exactly the
+              # applied events.
+              assert_equal FIXTURE_EVENT_COUNT, xlen.to_i,
+                "AC5: Redis XLEN must equal fixture count (#{FIXTURE_EVENT_COUNT})"
 
               # AC6: body must not have been drained by the router before the action.
               assert_equal 0, INGEST_FALCON_PRE_ACTION_READS.size,

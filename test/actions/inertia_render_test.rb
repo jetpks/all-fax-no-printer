@@ -41,7 +41,7 @@ class InertiaRenderTest < Minitest::Test
   # ── G2: Index render ─────────────────────────────────────────────────────
 
   def test_index_page_object_shape
-    _, headers, body = inertia_get("/")
+    _, headers, body = inertia_get("/conversations")
     assert_equal "true", headers["x-inertia"]
     assert_equal "application/json", headers["content-type"]
     data = parse_json(body)
@@ -55,7 +55,7 @@ class InertiaRenderTest < Minitest::Test
 
   def test_index_anon_sees_only_published
     pub = Factory[:conversation, published: true]
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     ids = data["props"]["conversations"].map { |c| c["id"] }
     assert_includes ids, pub.id
@@ -64,7 +64,7 @@ class InertiaRenderTest < Minitest::Test
 
   def test_index_signed_in_sees_owned
     sign_in(@owner)
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     ids = data["props"]["conversations"].map { |c| c["id"] }
     assert_includes ids, @conv.id
@@ -72,18 +72,18 @@ class InertiaRenderTest < Minitest::Test
 
   def test_index_conversation_list_json_exact_key_set
     pub = Factory[:conversation, published: true]
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     conv_data = data["props"]["conversations"].find { |c| c["id"] == pub.id }
     refute_nil conv_data
-    expected_keys = %w[id title status published turns_count owned].sort
+    expected_keys = %w[id title status published turns_count owned agent_role agent_name model original_cwd space_id updated_at].sort
     assert_equal expected_keys, conv_data.keys.sort,
                  "conversation_list_json key set must match exactly"
   end
 
   def test_index_owned_flag_true_for_owner
     sign_in(@owner)
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     conv_data = data["props"]["conversations"].find { |c| c["id"] == @conv.id }
     assert_equal true, conv_data["owned"]
@@ -93,7 +93,7 @@ class InertiaRenderTest < Minitest::Test
     # I36: turns_count is the denormalized column (0 here — @conv's messages
     # were inserted directly); just verify type/shape.
     sign_in(@owner)
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     conv_data = data["props"]["conversations"].find { |c| c["id"] == @conv.id }
     refute_nil conv_data
@@ -119,7 +119,8 @@ class InertiaRenderTest < Minitest::Test
     data = inertia_page("/conversations/#{@conv.id}")
     conv = data["props"]["conversation"]
     expected_keys = %w[id title status published source original_cwd git_branch
-                       agent_version can_manage owner parent children].sort
+                       agent_version agent_role agent_name model space_id
+                       can_manage owner parent children].sort
     assert_equal expected_keys, conv.keys.sort,
                  "conversation_json key set must match exactly"
   end
@@ -189,7 +190,7 @@ class InertiaRenderTest < Minitest::Test
 
   def test_version_header_prevents_409
     # Sending the correct digest → no stale-version 409
-    status, _, _ = inertia_get("/")
+    status, _, _ = inertia_get("/conversations")
     assert_equal 200, status, "correct X-Inertia-Version must not trigger 409"
   end
 end

@@ -22,20 +22,39 @@ module Space
         PAGE_SIZE = 50
 
         # Index scope: published ∪ owned-by-user, deduped, newest-updated first,
-        # paged (page size 50). Anonymous (user nil) → published only. Does NOT
-        # combine :messages — the Index action reads the denormalized turns_count
-        # column instead; loading every message here is what caused the studio 502
-        # (I36). Callers needing message-backed predicates (visible_messages,
-        # visible_to?) must use with_messages/for_show. Fetches PAGE_SIZE + 1 rows
-        # to detect has_more without a COUNT query.
-        def visible_to(user, page: 1)
-          if user.nil?
-            return paged(conversations.where(published: true), page)
-          end
+        # paged (page size 50). Anonymous (user nil) → published only. Optional
+        # filters narrow the scope: space_id (the ?space_id= list) or cwd (the
+        # unspaced ?cwd= drill-down). Does NOT combine :messages — the Index
+        # action reads the denormalized turns_count column instead; loading
+        # every message here is what caused the studio 502 (I36). Callers
+        # needing message-backed predicates (visible_messages, visible_to?)
+        # must use with_messages/for_show. Fetches PAGE_SIZE + 1 rows to detect
+        # has_more without a COUNT query.
+        def visible_to(user, page: 1, space_id: nil, cwd: nil)
+          scope = conversations.where(visible_scope_expr(user))
+          scope = scope.where(space_id: space_id) if space_id
+          scope = scope.where(original_cwd: cwd)  if cwd
+          paged(scope, page)
+        end
 
-          expr = Sequel.expr(published: true) |
-                 Sequel.expr(user_id: user.id)
-          paged(conversations.where(expr), page)
+        # Conversations attached to a space, newest-updated first (the
+        # spaces/show live feed).
+        def for_space(space_id)
+          conversations.where(space_id: space_id).order(Sequel.desc(:updated_at)).to_a
+        end
+
+        # Unspaced grouping: the viewer's space_id-NULL conversations (same
+        # visible scope as the index) bucketed by original_cwd, with per-bucket
+        # counts and last activity. Raw-dataset aggregation — no message loads.
+        def unspaced_cwd_buckets(user)
+          conversations.dataset
+            .where(space_id: nil)
+            .where(visible_scope_expr(user))
+            .select_group(:original_cwd)
+            .select_append { [count(:id).as(:conversations_count),
+                              max(:updated_at).as(:last_activity_at)] }
+            .order(Sequel.desc(Sequel.function(:max, :updated_at)))
+            .to_a
         end
 
         # Full show combine: user (for serializer owner block) and messages (ordered).
@@ -88,6 +107,13 @@ module Space
         end
 
         private
+
+        # published ∪ owned-by-user (anonymous → published only).
+        def visible_scope_expr(user)
+          return Sequel.expr(published: true) if user.nil?
+
+          Sequel.expr(published: true) | Sequel.expr(user_id: user.id)
+        end
 
         def paged(relation, page)
           rows = relation.order(Sequel.desc(:updated_at))

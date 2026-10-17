@@ -3,17 +3,23 @@
 module Space
   module Server
     module Actions
-      module Runs
+      module Conversations
+        # Live SSE onto a conversation. Mechanics identical to the pre-I08
+        # stream: xrange replay honoring Last-Event-ID, live fanout with a 15s
+        # heartbeat, and an id-less DB-replay fallback when the Redis display
+        # stream has expired and the conversation is terminal (see #db_replay
+        # for the fabricated-id aliasing trap). Terminal event type is
+        # "conversation_complete".
         class Stream < Space::Server::Action
-          include Space::Server::Deps["repos.runs_repo", "repos.messages_repo", "redis"]
+          include Space::Server::Deps["repos.conversations_repo", "repos.messages_repo", "redis"]
 
           def handle(req, res)
-            run = runs_repo.by_pk(req.params[:id].to_i)
-            halt_not_found(res) unless run
+            conversation = conversations_repo.with_messages(req.params[:id].to_i)
+            halt_not_found(res) unless conversation
 
             user = authenticated_user(req)
 
-            unless run.visible_to?(user)
+            unless conversation.visible_to?(user)
               res.content_type = JSON_CONTENT_TYPE
               if user
                 halt 403, JSON.generate(error: "Not authorized.")
@@ -28,7 +34,7 @@ module Space
             res.headers["x-accel-buffering"] = "no"
 
             last_event_id = req.get_header("HTTP_LAST_EVENT_ID")
-            fanout = Space::Server::Runs::StreamFanout.for(run.id, redis)
+            fanout = Space::Server::Conversations::StreamFanout.for(conversation.id, redis)
 
             body = proc do |stream|
               queue = fanout.subscribe
@@ -36,7 +42,7 @@ module Space
               error = nil
 
               begin
-                key = Space::Server::Runs::StreamKey.for(run.id)
+                key = Space::Server::Conversations::StreamKey.for(conversation.id)
                 start_id = last_event_id ? "(#{last_event_id}" : "-"
                 entries = redis.xrange(key, start_id, "+")
                 done = false
@@ -44,25 +50,20 @@ module Space
                   last_id = entry_id
                   stream << sse_format(entry_id, fields)
                   type_idx = fields.index("type")
-                  if type_idx && fields[type_idx + 1] == "run_complete"
+                  if type_idx && fields[type_idx + 1] == "conversation_complete"
                     done = true
                     break
                   end
                 end
 
-                # DB fallback: Redis stream expired, run is terminal (complete or failed)
-                if !done && (run.complete? || run.failed?)
-                  if run.conversation_id
-                    done = db_replay(stream, messages_repo.for_conversation(run.conversation_id))
-                  else
-                    stream << sse_format(nil, ["type", "run_complete", "data", JSON.generate(type: "run_complete")])
-                    done = true
-                  end
+                # DB fallback: Redis stream expired, conversation is terminal (completed or failed)
+                if !done && (conversation.completed? || conversation.failed?)
+                  done = db_replay(stream, conversation.messages)
                 end
 
                 unless done
                   loop do
-                    item = queue.pop(timeout: Space::Server::Runs::StreamFanout::HEARTBEAT_SECONDS)
+                    item = queue.pop(timeout: Space::Server::Conversations::StreamFanout::HEARTBEAT_SECONDS)
                     if item.nil?
                       stream << ": ping\n\n"
                       next
@@ -75,7 +76,7 @@ module Space
                     stream << sse_format(entry_id, fields)
 
                     type_idx = fields.index("type")
-                    break if type_idx && fields[type_idx + 1] == "run_complete"
+                    break if type_idx && fields[type_idx + 1] == "conversation_complete"
                   end
                 end
               rescue => error
@@ -138,7 +139,7 @@ module Space
               stream << sse_format(nil, ["type", "message_complete", "data", JSON.generate(type: "message_complete", stop_reason: "end_turn")])
             end
 
-            stream << sse_format(nil, ["type", "run_complete", "data", JSON.generate(type: "run_complete")])
+            stream << sse_format(nil, ["type", "conversation_complete", "data", JSON.generate(type: "conversation_complete")])
             true
           end
         end

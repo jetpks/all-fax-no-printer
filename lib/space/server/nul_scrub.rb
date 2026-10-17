@@ -4,7 +4,7 @@ module Space
   module Server
     # Postgres text/jsonb columns reject the NUL byte outright
     # (PG::UntranslatableCharacter) — recursively strip it from anything about
-    # to be persisted. Shared by Runs::Persistor, the place transcript content
+    # to be persisted. Shared by Conversations::Persistor, the place transcript content
     # reaches the database. (Was Importers::NulScrub; the importer tier died
     # with the I06 cut, the scrubbing didn't — recovered from the
     # pre-observation-deck tag.)

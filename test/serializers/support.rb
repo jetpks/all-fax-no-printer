@@ -20,7 +20,8 @@ TestTurn = Data.define(:anchor_id, :prompt, :rounds)
 
 TestConversation = Data.define(
   :id, :title, :status, :published, :source, :original_cwd, :git_branch,
-  :agent_version, :user, :owner_id
+  :agent_version, :agent_role, :agent_name, :model, :space_id, :updated_at,
+  :user, :owner_id
 ) do
   def owned_by?(viewer)
     viewer&.id == owner_id

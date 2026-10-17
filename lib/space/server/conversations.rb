@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "runs/stream_key"
+require_relative "conversations/stream_key"
 
 module Space
   module Server
-    module Runs
+    module Conversations
     end
   end
 end

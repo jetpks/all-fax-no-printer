@@ -4,10 +4,11 @@
 #
 # Ingests a multi-message fixture (text, tool_use, tool_result block types) over real
 # HTTP so the Persistor runs for real.  Then clears the Redis stream key to simulate
-# TTL expiry and asserts that GET /runs/:id/stream replays from the DB via db_replay.
+# TTL expiry and asserts that GET /conversations/:id/stream replays from the DB via
+# db_replay.
 #
-# AC-P3 faithfulness: reverting stream.rb lines 53-54 (the db_replay cutover) to a
-# no-op causes the stream body proc to enter the queue loop and never emit run_complete
+# AC-P3 faithfulness: reverting stream.rb's db_replay cutover to a no-op causes the
+# stream body proc to enter the queue loop and never emit conversation_complete
 # within the test timeout, making the assert_match below FAIL.
 
 require_relative "../test_helper"
@@ -18,8 +19,8 @@ require "async/http/client"
 require "async/http/endpoint"
 require "protocol/rack/adapter"
 require "protocol/http/body/buffered"
-require "space/server/runs/stream_fanout"
-require "space/server/runs/stream_key"
+require "space/server/conversations/stream_fanout"
+require "space/server/conversations/stream_key"
 
 Space::Server::App.start(:redis)
 
@@ -32,16 +33,13 @@ class PersistDbReplayTest < Minitest::Test
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :users].each { |t| conn[t].delete }
     @user  = Factory[:user]
-    @run   = Factory[:run, user_id: @user.id, status: 0, published: true]
     @redis = Space::Server::App["redis"]
-    Sync { @redis.call("DEL", "run:#{@run.id}") }
   end
 
   def test_ingest_persists_db_and_stream_replays_after_redis_expiry
     settings      = Space::Server::App["settings"]
-    runs_repo     = Space::Server::App["repos.runs_repo"]
     messages_repo = Space::Server::App["repos.messages_repo"]
     port          = 50100 + rand(400)
     endpoint      = Async::HTTP::Endpoint.parse("http://localhost:#{port}")
@@ -60,31 +58,31 @@ class PersistDbReplayTest < Minitest::Test
             client = Async::HTTP::Client.new(endpoint)
 
             task.with_timeout(30) do
-              # ── Phase 1: Ingest via real HTTP ──────────────────────────────────
+              # ── Phase 1: Ingest via real HTTP (terminal header → :completed) ──
 
               headers  = Protocol::HTTP::Headers.new([
                 ["content-type",  "application/x-ndjson"],
-                ["authorization", "Bearer #{TOKEN}"]
+                ["authorization", "Bearer #{TOKEN}"],
+                ["x-session-complete", "true"]
               ])
               body     = Protocol::HTTP::Body::Buffered.wrap(FIXTURE_JSONL)
-              response = client.post("/runs/#{@run.id}/ingest", headers, body)
+              response = client.post("/conversations/ingest", headers, body)
               raw      = response.read || ""
               response.finish
 
               assert_equal 202, response.status
               data = JSON.parse(raw)
-              assert_equal "complete", data["status"],
-                "ingest must complete (pi clean-EOF semantics)"
+              assert_equal "completed", data["status"],
+                "terminal header must complete the conversation"
               assert_equal FIXTURE_EVENT_COUNT, data["events"],
                 "fixture must produce #{FIXTURE_EVENT_COUNT} normalized events"
 
               # ── Phase 2: Assert incremental DB persistence ─────────────────────
 
-              run = runs_repo.by_pk(@run.id)
-              assert run.complete?,         "run must be complete after ingest"
-              refute_nil run.conversation_id, "run must have conversation_id after ingest"
+              conv = Space::Server::App["repos.conversations_repo"].by_pk(data["id"])
+              assert_equal :completed, conv.status, "conversation must be completed after terminal ingest"
 
-              msgs = messages_repo.for_conversation(run.conversation_id)
+              msgs = messages_repo.for_conversation(conv.id)
               assert_equal 4, msgs.size, "pi fixture produces 4 DB messages"
               assert_equal [0, 1, 2, 3], msgs.map(&:position), "positions must be sequential"
 
@@ -105,18 +103,22 @@ class PersistDbReplayTest < Minitest::Test
               assert msgs[3].content.any? { |b| b["type"] == "text" },
                 "assistant msg at pos 3 must have text block"
 
+              # Publish so the anonymous stream GET below passes visibility.
+              Space::Server::App["repos.conversations_repo"].update(conv.id, published: true)
+
               # ── Phase 3: Simulate Redis TTL expiry ────────────────────────────
 
-              @redis.call("DEL", Space::Server::Runs::StreamKey.for(run.id))
+              Sync { @redis.call("DEL", Space::Server::Conversations::StreamKey.for(conv.id)) }
 
               # ── Phase 4: GET stream — must replay from DB via db_replay ────────
               #
-              # AC-P3 proof: if stream.rb lines 53-54 are reverted to a no-op, the
-              # body proc enters the queue loop (queue.pop timeout=15s), never emits
-              # run_complete, the 8-second timeout fires, and assert_match below fails.
+              # AC-P3 proof: if stream.rb's db_replay cutover were reverted to a
+              # no-op, the body proc enters the queue loop (queue.pop timeout=15s),
+              # never emits conversation_complete, the 8-second timeout fires, and
+              # assert_match below fails.
 
               env = Rack::MockRequest.env_for(
-                "/runs/#{run.id}/stream",
+                "/conversations/#{conv.id}/stream",
                 "REQUEST_METHOD" => "GET"
               )
               _, _, body_proc = Space::Server::App.call(env)
@@ -134,14 +136,14 @@ class PersistDbReplayTest < Minitest::Test
               rescue Async::TimeoutError
                 # db_replay missing → stream loops on heartbeat; timeout = test fail below
               ensure
-                Space::Server::Runs::StreamFanout.stop(run.id)
+                Space::Server::Conversations::StreamFanout.stop(conv.id)
               end
 
               sse = chunks.join
 
-              assert_match "run_complete", sse,
-                "SSE replay must terminate with run_complete " \
-                "(AC-P3: reverting stream.rb lines 53-54 makes this fail)"
+              assert_match "conversation_complete", sse,
+                "SSE replay must terminate with conversation_complete " \
+                "(AC-P3: reverting the db_replay cutover makes this fail)"
               assert_match "Let me check the existing test patterns.", sse,
                 "SSE replay must include assistant text content"
               assert_match "tool_use", sse,
@@ -155,8 +157,9 @@ class PersistDbReplayTest < Minitest::Test
               # "0-1", "0-2", ...) would alias a real Redis stream position, and a
               # client that adopted it as Last-Event-ID would later reconnect with
               # `XRANGE ((0-N` against the real stream and replay it in full (see
-              # app/actions/runs/stream.rb#sse_format). The Redis key was deleted
-              # above, so this whole response is pure db_replay: no id: lines at all.
+              # app/actions/conversations/stream.rb#sse_format). The Redis key was
+              # deleted above, so this whole response is pure db_replay: no id:
+              # lines at all.
               refute_match(/^id:/, sse, "db_replay must not emit id: lines")
             end
           ensure

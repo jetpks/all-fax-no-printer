@@ -7,22 +7,22 @@ require_relative "stream_key"
 
 module Space
   module Server
-    module Runs
+    module Conversations
       class StreamFanout
         HEARTBEAT_SECONDS = 15
 
         @registry = {}
 
-        def self.for(run_id, redis)
-          @registry[run_id] ||= new(run_id, redis)
+        def self.for(conversation_id, redis)
+          @registry[conversation_id] ||= new(conversation_id, redis)
         end
 
-        def self.stop(run_id)
-          @registry.delete(run_id)&.stop
+        def self.stop(conversation_id)
+          @registry.delete(conversation_id)&.stop
         end
 
-        def initialize(run_id, redis)
-          @run_id = run_id
+        def initialize(conversation_id, redis)
+          @conversation_id = conversation_id
           @redis = redis
           @subscribers = []
           @task = nil
@@ -37,7 +37,7 @@ module Space
 
         def unsubscribe(queue)
           @subscribers.delete(queue)
-          self.class.stop(@run_id) if @subscribers.empty?
+          self.class.stop(@conversation_id) if @subscribers.empty?
         end
 
         def stop
@@ -63,7 +63,7 @@ module Space
             # ahead of `release`).
             dedicated = Async::Redis::Client.new(@redis.endpoint, protocol: @redis.protocol)
             begin
-              key = StreamKey.for(@run_id)
+              key = StreamKey.for(@conversation_id)
               last_id = "$"
               done = false
               loop do
@@ -76,7 +76,7 @@ module Space
                   @subscribers.each { |q| q << [entry_id, fields] }
 
                   type_idx = fields.index("type")
-                  if type_idx && fields[type_idx + 1] == "run_complete"
+                  if type_idx && fields[type_idx + 1] == "conversation_complete"
                     done = true
                     break
                   end

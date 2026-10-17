@@ -13,8 +13,8 @@ module Space
       # pi is the only parser this iteration keeps: its --mode json first line is
       # {"type":"session",...,"version":N,...} — no session_id/sessionId/sessionID/
       # part key, so "version" is the clean tell. There is no fallback parser: a
-      # non-pi first line leaves select at nil, Runs::Ingest's `Normalizer.select(
-      # record).new` raises, and the ingest rescue path fails the run — the same
+      # non-pi first line leaves select at nil, Conversations::Ingest's `Normalizer.select(
+      # record).new` raises, and the ingest rescue path fails visibly — the same
       # visible failure the I05 zero-event rule mandates for unrecognizable streams.
       def self.select(record)
         return Pi if record["type"] == "session" && record.key?("version")

@@ -9,6 +9,7 @@ module Space
             belongs_to :user
             has_many :iterations
             has_many :artifacts
+            has_many :conversations
           end
         end
       end

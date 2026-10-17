@@ -14,24 +14,24 @@ module Space
       get    "/logout", to: "sessions.destroy"
       delete "/logout", to: "sessions.destroy"
 
-      # Root and conversations list (same action, two paths — rows 4 & 5)
-      root to: "conversations.index"
-      get  "/conversations", to: "conversations.index"
+      # Root leads with spaces (same action, two paths)
+      root to: "spaces.index"
+      get  "/spaces", to: "spaces.index"
+
+      # Spaces
+      get "/spaces/:id",                      to: "spaces.show"
+      get "/spaces/:id/artifacts/:artifact_id", to: "spaces.artifact"
 
       # Conversations
-      get    "/conversations/:id",          to: "conversations.show"
-      patch  "/conversations/:id/publish",  to: "conversations.publish"
-      delete "/conversations/:id",          to: "conversations.destroy"
+      get  "/conversations",            to: "conversations.index"
+      get  "/conversations/:id",        to: "conversations.show"
+      get  "/conversations/:id/stream", to: "conversations.stream"
+      post "/conversations/ingest",     to: "conversations.ingest"
+      patch  "/conversations/:id/publish", to: "conversations.publish"
+      delete "/conversations/:id",         to: "conversations.destroy"
 
       # Messages (shallow member — publish toggle)
       patch "/messages/:id/publish", to: "messages.publish"
-
-      # Runs (live streaming — skeleton routes, ingest/stream bodies filled in I04/I05)
-      get  "/runs",             to: "runs.index"
-      post "/runs",             to: "runs.create"
-      post "/runs/:id/ingest",  to: "runs.ingest"
-      get  "/runs/:id/stream",  to: "runs.stream"
-      get  "/runs/:id",         to: "runs.show"
 
       # API tokens (per-user machine auth — mint/revoke; session-auth'd UI,
       # POST …/delete for the revoke)
@@ -39,13 +39,6 @@ module Space
       get  "/api_tokens/new",        to: "api_tokens.new"
       post "/api_tokens",            to: "api_tokens.create"
       post "/api_tokens/:id/delete", to: "api_tokens.destroy"
-
-      # Spaces
-      get "/spaces",                    to: "spaces.index"
-      get "/spaces/:id",                to: "spaces.show"
-      get "/spaces/:id/runs/:run_id",                        to: "spaces.run"
-      get "/spaces/:id/runs/:run_id/transcript",             to: "spaces.transcript"
-      get "/spaces/:id/artifacts/:artifact_id",              to: "spaces.artifact"
     end
   end
 end

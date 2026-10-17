@@ -226,7 +226,7 @@ class AuthzActionTest < Minitest::Test
     pub_conv   = Factory[:conversation, published: true]
     _priv_conv = @conv
 
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     ids = data["props"]["conversations"].map { |c| c["id"] }
 
@@ -241,7 +241,7 @@ class AuthzActionTest < Minitest::Test
     other_conv = Factory[:conversation, user_id: @owner.id, published: false]
 
     sign_in(@stranger)
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     ids = data["props"]["conversations"].map { |c| c["id"] }
 
@@ -252,7 +252,7 @@ class AuthzActionTest < Minitest::Test
 
   def test_index_signed_in_owner_sees_own_conversations
     sign_in(@owner)
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     ids = data["props"]["conversations"].map { |c| c["id"] }
     assert_includes ids, @conv.id, "owner must see own private conv"
@@ -260,7 +260,7 @@ class AuthzActionTest < Minitest::Test
 
   def test_index_user_with_empty_org_ids_returns_safely
     sign_in(@stranger)
-    status, _, body = inertia_get("/")
+    status, _, body = inertia_get("/conversations")
     assert_equal 200, status
     data = parse_json(body)
     assert_kind_of Array, data["props"]["conversations"]
@@ -268,10 +268,10 @@ class AuthzActionTest < Minitest::Test
 
   def test_index_conversation_list_json_key_set
     Factory[:conversation, published: true]
-    _, _, body = inertia_get("/")
+    _, _, body = inertia_get("/conversations")
     data = parse_json(body)
     conv = data["props"]["conversations"].first
-    expected_keys = %w[id title status published turns_count owned]
+    expected_keys = %w[id title status published turns_count owned agent_role agent_name model original_cwd space_id updated_at]
     expected_keys.each do |k|
       assert conv.key?(k), "conversation_list_json must include key #{k.inspect}"
     end

@@ -2,12 +2,12 @@
 
 module Space
   module Server
-    module Runs
+    module Conversations
       module StreamKey
         TTL_SECONDS = 1800  # 30 minutes
 
-        def self.for(run_id)
-          "run:#{run_id}"
+        def self.for(conversation_id)
+          "conversation:#{conversation_id}"
         end
       end
     end

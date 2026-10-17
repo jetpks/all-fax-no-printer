@@ -4,8 +4,8 @@ require_relative "../test_helper"
 require "async"
 require "async/redis"
 require "async/redis/endpoint"
-require "space/server/runs/stream_fanout"
-require "space/server/runs/stream_key"
+require "space/server/conversations/stream_fanout"
+require "space/server/conversations/stream_key"
 
 class StreamFanoutTest < Minitest::Test
   REDIS_SKIP_MSG = "Redis unreachable".freeze
@@ -37,7 +37,7 @@ class StreamFanoutTest < Minitest::Test
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :users].each { |t| conn[t].delete }
     @user = Factory[:user]
   end
 
@@ -57,12 +57,12 @@ class StreamFanoutTest < Minitest::Test
   end
 
   def test_subscribed_queue_receives_entries_after_xadd
-    run = Factory[:run, user_id: @user.id, status: 0]
-    key = Space::Server::Runs::StreamKey.for(run.id)
+    @conversation = Factory[:conversation, user_id: @user.id]
+    key = Space::Server::Conversations::StreamKey.for(@conversation.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Conversations::StreamFanout.for(@conversation.id, fanout_redis)
       queue = fanout.subscribe
 
       Async do
@@ -77,17 +77,17 @@ class StreamFanoutTest < Minitest::Test
       assert_equal "text_delta", fields[type_idx + 1]
     ensure
       fanout&.unsubscribe(queue) if queue
-      Space::Server::Runs::StreamFanout.stop(run.id)
+      Space::Server::Conversations::StreamFanout.stop(@conversation.id)
     end
   end
 
   def test_multiple_subscribers_each_receive_same_entries
-    run = Factory[:run, user_id: @user.id, status: 0]
-    key = Space::Server::Runs::StreamKey.for(run.id)
+    @conversation = Factory[:conversation, user_id: @user.id]
+    key = Space::Server::Conversations::StreamKey.for(@conversation.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Conversations::StreamFanout.for(@conversation.id, fanout_redis)
       queue1 = fanout.subscribe
       queue2 = fanout.subscribe
 
@@ -105,17 +105,17 @@ class StreamFanoutTest < Minitest::Test
     ensure
       fanout&.unsubscribe(queue1) if queue1
       fanout&.unsubscribe(queue2) if queue2
-      Space::Server::Runs::StreamFanout.stop(run.id)
+      Space::Server::Conversations::StreamFanout.stop(@conversation.id)
     end
   end
 
   def test_unsubscribe_removes_queue_and_stops_task_on_last_unsubscribe
-    run = Factory[:run, user_id: @user.id, status: 0]
-    key = Space::Server::Runs::StreamKey.for(run.id)
+    @conversation = Factory[:conversation, user_id: @user.id]
+    key = Space::Server::Conversations::StreamKey.for(@conversation.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Conversations::StreamFanout.for(@conversation.id, fanout_redis)
       queue1 = fanout.subscribe
       queue2 = fanout.subscribe
 
@@ -140,52 +140,52 @@ class StreamFanoutTest < Minitest::Test
 
       assert_equal 0, fanout.instance_variable_get(:@subscribers).length
     ensure
-      Space::Server::Runs::StreamFanout.stop(run.id)
+      Space::Server::Conversations::StreamFanout.stop(@conversation.id)
     end
   end
 
-  def test_run_complete_entry_stops_fanout_after_pushing_to_queues
-    run = Factory[:run, user_id: @user.id, status: 0]
-    key = Space::Server::Runs::StreamKey.for(run.id)
+  def test_conversation_complete_entry_stops_fanout_after_pushing_to_queues
+    @conversation = Factory[:conversation, user_id: @user.id]
+    key = Space::Server::Conversations::StreamKey.for(@conversation.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Conversations::StreamFanout.for(@conversation.id, fanout_redis)
       queue = fanout.subscribe
 
       Async do
         sleep XREAD_SETTLE_SECONDS
-        test_redis.xadd(key, "*", "type", "run_complete", "data", "{}")
+        test_redis.xadd(key, "*", "type", "conversation_complete", "data", "{}")
       end
 
       item = queue.pop(timeout: 5)
-      refute_nil item, "Subscriber must receive run_complete entry"
+      refute_nil item, "Subscriber must receive conversation_complete entry"
       _, fields = item
       type_idx = fields.index("type")
-      assert_equal "run_complete", fields[type_idx + 1]
+      assert_equal "conversation_complete", fields[type_idx + 1]
 
-      # Give the fanout task time to process the break after run_complete
+      # Give the fanout task time to process the break after conversation_complete
       Async::Task.current.yield
       Async::Task.current.yield
 
       # XADD another entry — fan-out task stopped, queue should not receive it
       test_redis.xadd(key, "*", "type", "text_delta", "data", "{}")
       next_item = queue.pop(timeout: 1)
-      assert_nil next_item, "No entries expected after run_complete stops the fanout"
+      assert_nil next_item, "No entries expected after conversation_complete stops the fanout"
     ensure
       fanout&.unsubscribe(queue) if queue
-      Space::Server::Runs::StreamFanout.stop(run.id)
+      Space::Server::Conversations::StreamFanout.stop(@conversation.id)
     end
   end
 
   # Characterization: double-unsubscribe is safe — Array#delete is a no-op on a
   # missing element and @task&.stop is safe on nil. Already correct on base.
   def test_characterization_double_unsubscribe_does_not_raise
-    run = Factory[:run, user_id: @user.id, status: 0]
-    key = Space::Server::Runs::StreamKey.for(run.id)
+    @conversation = Factory[:conversation, user_id: @user.id]
+    key = Space::Server::Conversations::StreamKey.for(@conversation.id)
 
     with_two_redis_clients do |fanout_redis, _test_redis|
-      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Conversations::StreamFanout.for(@conversation.id, fanout_redis)
       queue = fanout.subscribe
 
       fanout.unsubscribe(queue)
@@ -193,21 +193,21 @@ class StreamFanoutTest < Minitest::Test
       fanout.unsubscribe(queue)
       assert true, "double unsubscribe must not raise"
     ensure
-      Space::Server::Runs::StreamFanout.stop(run.id)
+      Space::Server::Conversations::StreamFanout.stop(@conversation.id)
     end
   end
 
-  def test_for_returns_same_instance_for_same_run_id
-    run = Factory[:run, user_id: @user.id, status: 0]
+  def test_for_returns_same_instance_for_same_conversation_id
+    @conversation = Factory[:conversation, user_id: @user.id]
 
     Sync do
       client = Async::Redis::Client.new(redis_endpoint)
       begin
-        fanout1 = Space::Server::Runs::StreamFanout.for(run.id, client)
-        fanout2 = Space::Server::Runs::StreamFanout.for(run.id, client)
-        assert_same fanout1, fanout2, "for() must return the same instance for the same run_id"
+        fanout1 = Space::Server::Conversations::StreamFanout.for(@conversation.id, client)
+        fanout2 = Space::Server::Conversations::StreamFanout.for(@conversation.id, client)
+        assert_same fanout1, fanout2, "for() must return the same instance for the same conversation id"
       ensure
-        Space::Server::Runs::StreamFanout.stop(run.id)
+        Space::Server::Conversations::StreamFanout.stop(@conversation.id)
         client.close
       end
     end
@@ -235,12 +235,12 @@ class StreamFanoutTest < Minitest::Test
   # shared client production uses (previously only exercised via dedicated per-fanout
   # clients above, or via catch-up/resume paths in runs_test.rb).
   def test_subscriber_established_before_xadd_receives_entry_on_shared_client
-    run = Factory[:run, user_id: @user.id, status: 0]
-    key = Space::Server::Runs::StreamKey.for(run.id)
+    @conversation = Factory[:conversation, user_id: @user.id]
+    key = Space::Server::Conversations::StreamKey.for(@conversation.id)
 
     with_shared_redis_client do |shared_redis, test_redis|
       test_redis.del(key)
-      fanout = Space::Server::Runs::StreamFanout.for(run.id, shared_redis)
+      fanout = Space::Server::Conversations::StreamFanout.for(@conversation.id, shared_redis)
       queue = fanout.subscribe
 
       Async do
@@ -252,13 +252,13 @@ class StreamFanoutTest < Minitest::Test
       refute_nil item, "Expected queue to receive an entry within 5s (subscriber established before XADD)"
     ensure
       fanout&.unsubscribe(queue) if queue
-      Space::Server::Runs::StreamFanout.stop(run.id)
+      Space::Server::Conversations::StreamFanout.stop(@conversation.id)
     end
   end
 
   # AC2(b): after a prior subscriber's fanout loop is stopped mid-XREAD BLOCK (the
   # disconnect path — subscribe, let the loop block with nothing ever written, then
-  # unsubscribe before any entry arrives), a NEW fanout for a DIFFERENT run, riding the
+  # unsubscribe before any entry arrives), a NEW fanout for a DIFFERENT conversation, riding the
   # SAME shared client, must still receive its own XADD promptly.
   #
   # Pre-fix: StreamFanout#start runs its XREAD BLOCK loop on the shared `@redis`. Stopping
@@ -268,11 +268,11 @@ class StreamFanoutTest < Minitest::Test
   # that same connection and its own XREAD queues forever behind a block that never
   # returns (see stream_fanout.rb's `start` and the CLIENT LIST `qbuf` smoking gun this
   # iteration's grounds describe).
-  def test_poisoned_connection_does_not_starve_a_different_runs_fanout
-    poisoned_run = Factory[:run, user_id: @user.id, status: 0]
-    fresh_run    = Factory[:run, user_id: @user.id, status: 0]
-    poisoned_key = Space::Server::Runs::StreamKey.for(poisoned_run.id)
-    fresh_key    = Space::Server::Runs::StreamKey.for(fresh_run.id)
+  def test_poisoned_connection_does_not_starve_a_later_conversations_fanout
+    poisoned_conversation = Factory[:conversation, user_id: @user.id]
+    fresh_conversation    = Factory[:conversation, user_id: @user.id]
+    poisoned_key = Space::Server::Conversations::StreamKey.for(poisoned_conversation.id)
+    fresh_key    = Space::Server::Conversations::StreamKey.for(fresh_conversation.id)
 
     with_shared_redis_client do |shared_redis, test_redis|
       test_redis.del(poisoned_key)
@@ -282,14 +282,14 @@ class StreamFanoutTest < Minitest::Test
       # Redis, then abandon it mid-block — simulates a client disconnecting before any
       # data arrives (the exact path StreamFanout#unsubscribe/#stop takes on every SSE
       # client disconnect).
-      poisoned_fanout = Space::Server::Runs::StreamFanout.for(poisoned_run.id, shared_redis)
+      poisoned_fanout = Space::Server::Conversations::StreamFanout.for(poisoned_conversation.id, shared_redis)
       poisoned_queue = poisoned_fanout.subscribe
       sleep XREAD_SETTLE_SECONDS
       poisoned_fanout.unsubscribe(poisoned_queue)
       Async::Task.current.yield
 
-      # A different run's fanout, riding the same shared client, must still work.
-      fresh_fanout = Space::Server::Runs::StreamFanout.for(fresh_run.id, shared_redis)
+      # A different conversation's fanout, riding the same shared client, must still work.
+      fresh_fanout = Space::Server::Conversations::StreamFanout.for(fresh_conversation.id, shared_redis)
       fresh_queue = fresh_fanout.subscribe
 
       Async do
@@ -298,11 +298,11 @@ class StreamFanoutTest < Minitest::Test
       end
 
       item = fresh_queue.pop(timeout: 5)
-      refute_nil item, "A new run's fanout must not be starved by a prior poisoned shared-pool connection"
+      refute_nil item, "A new conversation's fanout must not be starved by a prior poisoned shared-pool connection"
     ensure
       fresh_fanout&.unsubscribe(fresh_queue) if fresh_queue
-      Space::Server::Runs::StreamFanout.stop(poisoned_run.id)
-      Space::Server::Runs::StreamFanout.stop(fresh_run.id)
+      Space::Server::Conversations::StreamFanout.stop(poisoned_conversation.id)
+      Space::Server::Conversations::StreamFanout.stop(fresh_conversation.id)
     end
   end
 end

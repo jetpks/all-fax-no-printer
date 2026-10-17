@@ -7,8 +7,9 @@ module Space
   module Server
     module Normalizer
       # Stateful parser for pi's `--mode json` line stream (one JSON object per
-      # LF line, no run_complete-style sentinel — EOF + exit code end the stream;
-      # see Runs::Ingest#complete_at_eof? below).
+      # LF line, no terminal sentinel — EOF + exit code end the stream when pi
+      # runs to completion; for chunked POSTs the ingest mouth's
+      # X-Session-Complete header is the terminal signal).
       #
       # message_end always carries the message's COMPLETE final content (like
       # ClaudeCode's non-partial "assistant" record), so it is treated as the
@@ -30,7 +31,7 @@ module Space
           dispatch(record)
         end
 
-        # Duck-typed by Runs::Ingest: pi's stream has no completion sentinel, so
+        # Duck-typed by Conversations::Ingest: pi's stream has no completion sentinel, so
         # reaching clean EOF (no read error) after this parser was ever used is
         # itself the completion signal — the real success/failure arbiter is the
         # harness exit code, checked by the run's owner after ingest.
@@ -55,7 +56,7 @@ module Space
         end
 
         def handle_session(record)
-          [Event.make(:run_init, session_id: record["id"], cwd: record["cwd"])]
+          [Event.make(:session_init, session_id: record["id"], cwd: record["cwd"])]
         end
 
         def handle_message_end(record)
