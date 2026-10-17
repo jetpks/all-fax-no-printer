@@ -78,7 +78,7 @@ GEM
       fiber-annotation
       fiber-local (~> 1.1)
       json
-    csv (3.3.5)
+    csv (3.3.6)
     date (3.5.1)
     dotenv (3.2.0)
     drb (2.2.3)
@@ -209,17 +209,15 @@ GEM
       rom (~> 5.4, >= 5.4.1)
       rom-sql (~> 3.7)
       zeitwerk (~> 2.6)
-    hanami-router (2.3.1)
+    hanami-router (3.0.0)
       csv (~> 3.3)
-      mustermann (~> 3.0)
-      mustermann-contrib (~> 3.0)
+      mustermann (~> 3.1)
       rack (>= 2.2.16)
     hanami-utils (2.3.0)
       bigdecimal (~> 3.1)
       concurrent-ruby (~> 1.0)
       dry-core (~> 1.0, < 2)
       dry-transformer (~> 1.0, < 2)
-    hansi (0.2.1)
     hashie (5.1.0)
       logger
     i18n (1.14.8)
@@ -247,9 +245,6 @@ GEM
     multi_xml (0.9.1)
       bigdecimal (>= 3.1, < 5)
     mustermann (3.1.1)
-    mustermann-contrib (3.1.1)
-      hansi (~> 0.2.0)
-      mustermann (= 3.1.1)
     mutex_m (0.3.0)
     net-http (0.9.1)
       uri (>= 0.11.1)
@@ -302,7 +297,7 @@ GEM
     psych (5.4.0)
       date
       stringio
-    rack (3.2.6)
+    rack (3.2.7)
     rack-protection (4.2.1)
       base64 (>= 0.1.0)
       logger (>= 1.6.0)
@@ -402,7 +397,7 @@ DEPENDENCIES
   hanami-db (= 2.3.0)
   hanami-force-ssl!
   hanami-healthcheck!
-  hanami-router (= 2.3.1)
+  hanami-router (= 3.0.0)
   inertia-hanami!
   logger
   minitest
@@ -432,7 +427,7 @@ CHECKSUMS
   bigdecimal (3.3.1) sha256=eaa01e228be54c4f9f53bf3cc34fe3d5e845c31963e7fcc5bedb05a4e7d52218
   concurrent-ruby (1.3.6) sha256=6b56837e1e7e5292f9864f34b69c5a2cbc75c0cf5338f1ce9903d10fa762d5ab
   console (1.36.0) sha256=45599ea906cf80a73d8941f03abf873fe66a6a954e0bac5bc1c01e2cdc406f07
-  csv (3.3.5) sha256=6e5134ac3383ef728b7f02725d9872934f523cb40b961479f69cf3afa6c8e73f
+  csv (3.3.6) sha256=aba61e7e507a66f03d45cb1f3c4b6359861c3504038b422962875dce099e4456
   date (3.5.1) sha256=750d06384d7b9c15d562c76291407d89e368dda4d4fff957eb94962d325a0dc0
   dotenv (3.2.0) sha256=e375b83121ea7ca4ce20f214740076129ab8514cd81378161f11c03853fe619d
   drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
@@ -470,9 +465,8 @@ CHECKSUMS
   hanami-db (2.3.0) sha256=d6baa6c16a9321e5132799b8b26c3e6a2e19b8c5515c8785fb1ab94720d94711
   hanami-force-ssl (0.1.0)
   hanami-healthcheck (0.1.0)
-  hanami-router (2.3.1) sha256=81b3665cb851de5703bd2fea3f375eccb2af871288cf130ab0fbc42b3b8ae31f
+  hanami-router (3.0.0) sha256=2438db070c7ed7d3f28f1777fc32bdc86e7a9b744a29ab51098f4fa41408210b
   hanami-utils (2.3.0) sha256=aa00f6c377ab4ad2cbe57d989781bace348c9f234201bc60715058dc6e220999
-  hansi (0.2.1) sha256=7e27dfd729f1692a3a7690fc0ef3af9d5e3cfc0285bb135cae7e56180e4805db
   hashie (5.1.0) sha256=c266471896f323c446ea8207f8ffac985d2718df0a0ba98651a3057096ca3870
   i18n (1.14.8) sha256=285778639134865c5e0f6269e0b818256017e8cde89993fdfcbfb64d088824a5
   ice_nine (0.11.2) sha256=5d506a7d2723d5592dc121b9928e4931742730131f22a1a37649df1c1e2e63db
@@ -490,7 +484,6 @@ CHECKSUMS
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   multi_xml (0.9.1) sha256=7ce766b59c17241ed62976caeae1fae9b2431b263398c35396239a68c4a64e57
   mustermann (3.1.1) sha256=4c6170c7234d5499c345562ba7c7dfe73e1754286dcc1abb053064d66a127198
-  mustermann-contrib (3.1.1) sha256=c3ecf24f71668222e7554721fa6957d9dfe504997fd8c12a8557d8c39a82a81d
   mutex_m (0.3.0) sha256=cfcb04ac16b69c4813777022fdceda24e9f798e48092a2b817eb4c0a782b0751
   net-http (0.9.1) sha256=25ba0b67c63e89df626ed8fac771d0ad24ad151a858af2cc8e6a716ca4336996
   oauth2 (2.0.23) sha256=e61160104ded11c4cd1b54bc0a7cb80212289e417a4652003bcf4c5a4344824c
@@ -517,7 +510,7 @@ CHECKSUMS
   protocol-redis (0.13.0) sha256=e458797120db530469ef8fc04daa1834dba403b5d92033d49ca69eff6c06639d
   protocol-url (0.4.0) sha256=64d4c03b6b51ad815ac6fdaf77a1d91e5baf9220d26becb846c5459dacdea9e1
   psych (5.4.0) sha256=14f72d69a611af663d7d70e4a7b67d9eb1f3ae9f8d916b478961d5a0075ba5b7
-  rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
+  rack (3.2.7) sha256=93e13e1c24f93556671d85d2d79fa228c3485815c50d7e2f265b5330c6528fb7
   rack-protection (4.2.1) sha256=cf6e2842df8c55f5e4d1a4be015e603e19e9bc3a7178bae58949ccbb58558bac
   rack-proxy (0.8.2) sha256=d3086e865cbe74e627d41d2c6cd24521206c68d9e0308576760ea06d68e11ab0
   rack-session (2.1.2) sha256=595434f8c0c3473ae7d7ac56ecda6cc6dfd9d37c0b2b5255330aa1576967ffe8
