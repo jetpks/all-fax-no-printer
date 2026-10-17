@@ -25,7 +25,7 @@ gem "hanami-router", "2.3.1"
 gem "falcon", "0.55.5"
 
 # Redis (display streams for the runs chain; sole consumer: config/providers/redis.rb)
-gem "async-redis", "0.13.1"
+gem "async-redis", "0.14.0"
 
 # Persistence
 gem "rom", "5.4.3"
