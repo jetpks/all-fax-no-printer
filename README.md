@@ -74,9 +74,8 @@ it as a conversation. The first line of a session's first POST must be the
 `{"type":"session",...}` record; it may reappear in later chunks —
 re-processing it is a metadata no-op.
 
-Machine pushes authenticate with `Authorization: Bearer <token>`: per-user
-`sat_` tokens are the primary path; the shared `INGEST_TOKEN` remains as
-legacy back-compat. No bearer → `401`.
+Machine pushes authenticate with `Authorization: Bearer <token>` where
+`<token>` is a per-user `sat_` token (see below). No bearer → `401`.
 
 ### Optional headers (applied idempotently per POST)
 
@@ -118,20 +117,6 @@ Lookup is a unique-index hit on the presented token's SHA-256 digest — never
 a linear scan or plaintext comparison. Every use touches `last_used_at` on
 the token row. Failed bearer attempts warn-log request path and outcome only
 — never token material.
-
-### Legacy global INGEST_TOKEN (back-compat)
-
-| Env var             | Description                                      |
-|---------------------|--------------------------------------------------|
-| `INGEST_TOKEN`      | Secret bearer token for `POST /conversations/ingest` |
-| `INGEST_USER_ID`    | Integer user ID that ingested conversations are owned by (plain config, not a secret) |
-
-When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are
-authenticated as the configured user and bypass CSRF (machine pushes carry no
-session cookie). Browser/cookie requests are unaffected and continue to
-enforce CSRF normally. Deployed CLI setups configured this way keep working
-unchanged; per-user tokens take precedence when a presented bearer matches
-one.
 
 ## Deploy
 

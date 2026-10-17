@@ -12,7 +12,7 @@ module Space
     class Action < Hanami::Action
       include Dry::Monads[:result]
       include InertiaHanami::Action
-      include Space::Server::Deps["repos.users_repo", "repos.api_tokens_repo", "settings"]
+      include Space::Server::Deps["repos.users_repo", "repos.api_tokens_repo"]
 
       private
 
@@ -25,23 +25,18 @@ module Space
         users_repo.by_pk(uid)
       end
 
-      # Bearer-token lookup, two paths:
-      #   1. Per-user API tokens — the presented bearer is SHA-256 hashed and
-      #      looked up on api_tokens.token_hash (unique index, revoked tokens
-      #      excluded). A hit authenticates as the token's owner.
-      #   2. Legacy global INGEST_TOKEN — byte-for-byte back-compat with the
-      #      deployed CLI path: constant-time compare against settings, run
-      #      attribution to settings.ingest_user_id.
+      # Bearer-token lookup. The presented bearer is SHA-256 hashed and looked
+      # up on api_tokens.token_hash (unique index, revoked tokens excluded) —
+      # a hit authenticates as the token's owner. This is the only machine-auth
+      # path — the legacy shared global-token fallback was removed.
       # A rejected bearer warns (path + outcome + hash shape only — never token
       # material) so failed machine pushes are visible in logs.
-      # Nil/empty configured token can NEVER match — guarded explicitly before
-      # secure_compare.
       def token_user(req)
         auth = req.env["HTTP_AUTHORIZATION"].to_s
         return nil unless auth.start_with?("Bearer ")
 
         bearer = auth[7..]
-        user = api_token_user(bearer) || global_token_user(bearer)
+        user = api_token_user(bearer)
         warn_rejected_bearer(req, bearer) unless user
         user
       end
@@ -50,7 +45,7 @@ module Space
         current_user(req) || token_user(req)
       end
 
-      # --- Bearer auth paths (see token_user) --------------------------------
+      # --- Bearer auth path (see token_user) ---------------------------------
 
       # Per-user API token. Hash-lookup semantics: the digest either indexes a
       # row or it doesn't — no linear scan, no plaintext comparison. A hit
@@ -63,21 +58,6 @@ module Space
 
         api_tokens_repo.touch_last_used(token.id)
         users_repo.by_pk(token.user_id)
-      end
-
-      # Legacy global INGEST_TOKEN — preserved byte-for-byte as the back-compat
-      # fallback (deployed CLI setups keep working; IngestToken#resolve! has no
-      # callers and hand-set env remains load-bearing).
-      def global_token_user(bearer)
-        token = settings.ingest_token
-        return nil if token.nil? || token.empty?
-
-        return nil unless ::Rack::Utils.secure_compare(token, bearer)
-
-        uid = settings.ingest_user_id
-        return nil if uid.nil?
-
-        users_repo.by_pk(uid)
       end
 
       # Failure visibility (I02 silent-401 gap): log path + outcome + a hash

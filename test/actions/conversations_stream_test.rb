@@ -10,27 +10,19 @@ require "space/server/conversations/stream_key"
 class ConversationsStreamActionTest < Minitest::Test
   include ActionTestHelper
 
-  TOKEN = "ingest-secret-test-token-deadbeef0123456789"
-
   def setup
     setup_db
     OmniAuth.config.test_mode = true
     @owner = Factory[:user, github_uid: "stream-owner", username: "stream_owner"]
     @other = Factory[:user, github_uid: "stream-other", username: "stream_other"]
-    @settings = Space::Server::App["settings"]
   end
 
   def teardown
     OmniAuth.config.mock_auth[:github] = :csrf_detected
   end
 
-  def with_token_settings(token: TOKEN, user_id: nil)
-    user_id ||= @owner.id
-    @settings.stub(:ingest_token, token) do
-      @settings.stub(:ingest_user_id, user_id) do
-        yield
-      end
-    end
+  def mint_token(user, name = "cli")
+    Space::Server::App["repos.api_tokens_repo"].create(user_id: user.id, name: name)
   end
 
   def redis_endpoint
@@ -78,24 +70,21 @@ class ConversationsStreamActionTest < Minitest::Test
 
   def test_stream_bearer_wrong_token_returns_401
     conv = Factory[:conversation, user_id: @owner.id, status: 1, published: false]
-    with_token_settings do
-      env = Rack::MockRequest.env_for("/conversations/#{conv.id}/stream", "REQUEST_METHOD" => "GET")
-      env["HTTP_AUTHORIZATION"] = "Bearer wrong-token"
-      status, _, body = app.call(env)
-      assert_equal 401, status
-      assert parse_json(body).key?("error")
-    end
+    env = Rack::MockRequest.env_for("/conversations/#{conv.id}/stream", "REQUEST_METHOD" => "GET")
+    env["HTTP_AUTHORIZATION"] = "Bearer wrong-token"
+    status, _, body = app.call(env)
+    assert_equal 401, status
+    assert parse_json(body).key?("error")
   end
 
   def test_stream_bearer_owner_returns_sse_headers
+    secret, = mint_token(@owner)
     conv = Factory[:conversation, user_id: @owner.id, status: 1, published: false]
-    with_token_settings(user_id: @owner.id) do
-      env = Rack::MockRequest.env_for("/conversations/#{conv.id}/stream", "REQUEST_METHOD" => "GET")
-      env["HTTP_AUTHORIZATION"] = "Bearer #{TOKEN}"
-      status, headers, _ = app.call(env)
-      assert_equal 200, status
-      assert_equal "text/event-stream", headers["content-type"]
-    end
+    env = Rack::MockRequest.env_for("/conversations/#{conv.id}/stream", "REQUEST_METHOD" => "GET")
+    env["HTTP_AUTHORIZATION"] = "Bearer #{secret}"
+    status, headers, _ = app.call(env)
+    assert_equal 200, status
+    assert_equal "text/event-stream", headers["content-type"]
   end
 
   # --- replay mechanics -----------------------------------------------------------------

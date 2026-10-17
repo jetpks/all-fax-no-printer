@@ -2,10 +2,9 @@
 # frozen_string_literal: true
 
 # Production launcher — execs the supervised web topology in one host process.
-# INGEST_TOKEN/INGEST_USER_ID pass through from the environment untouched: the
-# token_user fallback in app/action.rb reads them per-request, so a directly-set
-# INGEST_TOKEN is used as-is and per-user API tokens are preferred when one
-# matches. (The former op://-ref resolution helper died with the I06 cut.)
+# Machine auth is per-user sat_ tokens only: the legacy shared global-token
+# fallback was removed, so nothing in the environment feeds ingest auth anymore.
+# (The former op://-ref resolution helper died with the I06 cut.)
 #
 # Usage: bin/serve
 
