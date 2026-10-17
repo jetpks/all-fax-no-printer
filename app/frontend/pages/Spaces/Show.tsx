@@ -1,26 +1,12 @@
-import { useMemo, useState } from 'react'
 import { Head, Link } from '@inertiajs/react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
 import Markdown from '@/components/Markdown'
-import TurnComponent from '@/components/Turn'
-import {
-  buildCommandPairs,
-  buildFoldedIndex,
-  buildToolResultIndex,
-  isAbsorbed,
-} from '@/lib/message-pairing'
-import { isEncryptedThinking } from '@/lib/tools'
 import type {
-  Annotation,
-  ArchitectRun,
-  Round as RoundType,
   Space,
   SpaceArtifact,
+  SpaceConversation,
   SpaceIteration,
-  SpaceRun,
-  Turn as TurnType,
 } from '@/types'
 import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, formatAbsolute, relativeTime } from './helpers'
 import { interleaveTimeline } from './timeline'
@@ -28,17 +14,8 @@ import { interleaveTimeline } from './timeline'
 type Props = {
   space: Space
   iterations: SpaceIteration[]
-  architect_runs: ArchitectRun[]
-  unassigned_runs: SpaceRun[]
+  conversations: SpaceConversation[]
   other_artifacts: SpaceArtifact[]
-}
-
-function HarnessModelBadge({ harness, model }: { harness?: string | null; model?: string | null }) {
-  const parts = [harness, model].filter(Boolean)
-  if (parts.length === 0) return null
-  return (
-    <span className="font-mono text-xs text-muted-foreground">{parts.join(' · ')}</span>
-  )
 }
 
 function ArtifactRow({ spaceId, artifact }: { spaceId: number; artifact: SpaceArtifact }) {
@@ -58,37 +35,26 @@ function ArtifactRow({ spaceId, artifact }: { spaceId: number; artifact: SpaceAr
   )
 }
 
-function RunRow({
-  spaceId,
-  run,
-  gitUtcOffset,
-}: {
-  spaceId: number
-  run: SpaceRun
-  gitUtcOffset?: number | null
-}) {
+function ConversationRow({ conversation }: { conversation: SpaceConversation }) {
   return (
-    <li className="flex items-center justify-between py-1 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground">
-          {run.lane} ({run.role})
-        </span>
-        <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
-        <HarnessModelBadge harness={run.harness} model={run.model} />
-        {run.created_at && (
-          <span className="text-xs text-muted-foreground">
-            {relativeTime(run.created_at)}
-            {' · '}
-            <span className="font-mono">{formatAbsolute(run.created_at, gitUtcOffset)}</span>
-          </span>
+    <li className="flex items-center justify-between gap-2 py-1 text-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <Link href={`/conversations/${conversation.id}`} className="truncate hover:underline">
+          {conversation.title}
+        </Link>
+        {conversation.agent_role && (
+          <Badge variant="outline" className="shrink-0">
+            {conversation.agent_role}
+          </Badge>
+        )}
+        <Badge variant={STATUS_VARIANT[conversation.status] ?? 'outline'} className="shrink-0">
+          {conversation.status}
+        </Badge>
+        {conversation.model && (
+          <span className="shrink-0 font-mono text-xs text-muted-foreground">{conversation.model}</span>
         )}
       </div>
-      <Link
-        href={`/spaces/${spaceId}/runs/${run.id}`}
-        className="text-xs font-medium hover:underline"
-      >
-        View transcript
-      </Link>
+      <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(conversation.updated_at)}</span>
     </li>
   )
 }
@@ -151,7 +117,7 @@ function IterationSection({
       )}
 
       {iteration.artifacts.length > 0 && (
-        <div className="mb-3">
+        <div>
           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Artifacts
           </p>
@@ -162,127 +128,6 @@ function IterationSection({
           </ul>
         </div>
       )}
-
-      {iteration.runs.length > 0 && (
-        <div>
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Runs
-          </p>
-          <ul className="space-y-0.5">
-            {iteration.runs.map((run) => (
-              <RunRow key={run.id} spaceId={space.id} run={run} gitUtcOffset={space.git_utc_offset} />
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectRun }) {
-  // Turns are eagerly loaded into props — no fetch needed.
-  const [expanded, setExpanded] = useState(true)
-
-  const turns = run.turns ?? []
-
-  const allMessages = useMemo(
-    () =>
-      turns.flatMap((t) => [
-        ...(t.prompt ? [t.prompt] : []),
-        ...t.rounds.flatMap((r) => r.messages),
-      ]),
-    [turns],
-  )
-  const toolResults = useMemo(() => buildToolResultIndex(allMessages), [allMessages])
-  const commandPairs = useMemo(() => buildCommandPairs(allMessages), [allMessages])
-  const emptyAnnotatedIds = useMemo(() => new Set<number>(), [])
-  const folded = useMemo(
-    () =>
-      buildFoldedIndex(
-        allMessages,
-        toolResults,
-        commandPairs.foldedByCommandId,
-        emptyAnnotatedIds,
-      ),
-    [allMessages, toolResults, commandPairs, emptyAnnotatedIds],
-  )
-  const visibleRounds = useMemo(() => {
-    const visible = (turn: TurnType): RoundType[] =>
-      turn.rounds
-        .map((round) => ({
-          anchor_id: round.anchor_id,
-          messages: round.messages.filter((m) => {
-            if (isEncryptedThinking(m)) return false
-            return !isAbsorbed(m, toolResults, emptyAnnotatedIds)
-          }),
-        }))
-        .filter((round) => round.messages.length > 0)
-    return new Map(turns.map((t) => [t.anchor_id, visible(t)]))
-  }, [turns, toolResults, emptyAnnotatedIds])
-  const emptyAnnotations = useMemo(() => new Map<string, Annotation[]>(), [])
-  const owner = useMemo(
-    () => ({ username: run.role, name: null, avatar_url: null }),
-    [run.role],
-  )
-
-  const displayTime = run.occurred_at ?? run.created_at
-  const Chevron = expanded ? ChevronDown : ChevronRight
-
-  return (
-    <section
-      id={`architect-run-${run.id}`}
-      className="scroll-mt-20 rounded-lg border border-border p-4"
-    >
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={() => setExpanded((e) => !e)}
-          aria-label={expanded ? 'Collapse architect session' : 'Expand architect session'}
-          className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-        >
-          <Chevron className="size-4" />
-        </button>
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          architect
-        </span>
-        <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
-        <HarnessModelBadge harness={run.harness} model={run.model} />
-        {displayTime && (
-          <span className="ml-auto text-xs text-muted-foreground">
-            {relativeTime(displayTime)}
-            {' · '}
-            <span className="font-mono">{formatAbsolute(displayTime, space.git_utc_offset)}</span>
-          </span>
-        )}
-      </div>
-
-      {expanded && (
-        <div className="mt-3">
-          {turns.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No transcript available.</p>
-          ) : (
-            <ol className="mt-2 space-y-3">
-              {turns.map((turn, i) => (
-                <TurnComponent
-                  key={turn.anchor_id}
-                  anchorId={turn.anchor_id}
-                  number={i + 1}
-                  prompt={turn.prompt}
-                  rounds={visibleRounds.get(turn.anchor_id) ?? []}
-                  conversationId={run.conversation_id ?? 0}
-                  annotations={emptyAnnotations}
-                  toolResults={toolResults}
-                  commandStdout={commandPairs.stdoutByMessageId}
-                  folded={folded}
-                  reveal={null}
-                  color="transparent"
-                  projectRoot={null}
-                  owner={owner}
-                />
-              ))}
-            </ol>
-          )}
-        </div>
-      )}
     </section>
   )
 }
@@ -290,11 +135,10 @@ function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectR
 export default function Show({
   space,
   iterations,
-  architect_runs,
-  unassigned_runs,
+  conversations,
   other_artifacts,
 }: Props) {
-  const timeline = interleaveTimeline(iterations, architect_runs)
+  const timeline = interleaveTimeline(iterations, conversations)
   const sortedIterations = timeline
     .filter(
       (item): item is { type: 'iteration'; data: SpaceIteration } => item.type === 'iteration',
@@ -348,25 +192,17 @@ export default function Show({
                 iteration={item.data}
               />
             ) : (
-              <ArchitectSessionSection
-                key={`arun-${item.data.id}`}
-                space={space}
-                run={item.data}
-              />
+              <section
+                id={`conversation-${item.data.id}`}
+                className="rounded-lg border border-border p-4"
+              >
+                <ul className="divide-y divide-border">
+                  <ConversationRow conversation={item.data} />
+                </ul>
+              </section>
             ),
           )}
         </div>
-      )}
-
-      {unassigned_runs.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-lg font-semibold">Unassigned Runs</h2>
-          <ul className="space-y-0.5 rounded-lg border border-border p-4">
-            {unassigned_runs.map((run) => (
-              <RunRow key={run.id} spaceId={space.id} run={run} gitUtcOffset={space.git_utc_offset} />
-            ))}
-          </ul>
-        </section>
       )}
 
       {other_artifacts.length > 0 && (

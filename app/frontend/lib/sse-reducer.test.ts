@@ -11,11 +11,11 @@ function applyWithIds(pairs: [SSEEvent, string][]): SSEState {
   return pairs.reduce((s, [ev, id]) => reduce(s, ev, id), initialState)
 }
 
-// --- run_init ---
+// --- session_init ---
 
-describe('reduce — run_init', () => {
+describe('reduce — session_init', () => {
   it('sets status to live', () => {
-    const state = reduce(initialState, { type: 'run_init' })
+    const state = reduce(initialState, { type: 'session_init' })
     expect(state.status).toBe('live')
   })
 })
@@ -140,10 +140,10 @@ describe('reduce — tool_result', () => {
     expect(state.messages[1].blocks[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'tu-1', content: 'ok' })
   })
 
-  it('flushes pending tool results on run_complete', () => {
+  it('flushes pending tool results on conversation_complete', () => {
     const state = applyAll([
       { type: 'tool_result', tool_use_id: 'tu-1', content: 'done', is_error: false },
-      { type: 'run_complete' },
+      { type: 'conversation_complete' },
     ])
     expect(state.status).toBe('complete')
     expect(state.messages).toHaveLength(1)
@@ -153,18 +153,18 @@ describe('reduce — tool_result', () => {
   it('marks is_error=true for error results', () => {
     const state = applyAll([
       { type: 'tool_result', tool_use_id: 'tu-err', content: 'failed', is_error: true },
-      { type: 'run_complete' },
+      { type: 'conversation_complete' },
     ])
     const block = state.messages[0].blocks[0]
     expect(block['is_error']).toBe(true)
   })
 })
 
-// --- run_complete ---
+// --- conversation_complete ---
 
-describe('reduce — run_complete', () => {
+describe('reduce — conversation_complete', () => {
   it('sets status to complete', () => {
-    const state = reduce(initialState, { type: 'run_complete' })
+    const state = reduce(initialState, { type: 'conversation_complete' })
     expect(state.status).toBe('complete')
   })
 })
@@ -220,7 +220,7 @@ describe('mergedMessages', () => {
 describe('full event sequence', () => {
   it('produces the expected message state for a complete assistant + tool round', () => {
     const state = applyAll([
-      { type: 'run_init', session_id: 's1', model: 'claude-3', cwd: '/tmp', tools: [] },
+      { type: 'session_init', session_id: 's1', model: 'claude-3', cwd: '/tmp', tools: [] },
       { type: 'message_start', role: 'assistant', model: 'claude-3', message_id: 'msg-1' },
       { type: 'block_open', block_id: '0', index: 0, block_type: 'text' },
       { type: 'text_delta', block_id: '0', text: 'Let me check.' },
@@ -235,7 +235,7 @@ describe('full event sequence', () => {
       { type: 'text_delta', block_id: '0', text: 'Done.' },
       { type: 'block_close', block_id: '0' },
       { type: 'message_complete', message_id: 'msg-2', stop_reason: 'end_turn', usage: null },
-      { type: 'run_complete' },
+      { type: 'conversation_complete' },
     ])
 
     expect(state.status).toBe('complete')
@@ -302,17 +302,17 @@ describe('reconnect — no duplicate on replay', () => {
   })
 })
 
-describe('run_complete — stops further event processing', () => {
-  it('ignores events received after run_complete', () => {
+describe('conversation_complete — stops further event processing', () => {
+  it('ignores events received after conversation_complete', () => {
     const after = applyAll([
       { type: 'message_start', role: 'assistant', model: null, message_id: 'msg-1' },
-      { type: 'run_complete' },
+      { type: 'conversation_complete' },
       // These arrive after complete (e.g. reconnect that shouldn't happen).
       { type: 'message_start', role: 'assistant', model: null, message_id: 'msg-2' },
       { type: 'text_delta', block_id: '0', text: 'ghost' },
     ])
     expect(after.status).toBe('complete')
-    // Only the message from before run_complete is present.
+    // Only the message from before conversation_complete is present.
     expect(after.messages).toHaveLength(1)
   })
 })
@@ -320,7 +320,7 @@ describe('run_complete — stops further event processing', () => {
 describe('numeric id comparison — multi-digit seq', () => {
   it('applies a forward event when seq crosses a digit boundary (0-9 -> 0-10)', () => {
     const state = applyWithIds([
-      [{ type: 'run_init' }, '0-9'],
+      [{ type: 'session_init' }, '0-9'],
       [{ type: 'message_start', role: 'assistant', model: null, message_id: 'msg-1' }, '0-10'],
     ])
     expect(state.lastAppliedId).toBe('0-10')
@@ -330,7 +330,7 @@ describe('numeric id comparison — multi-digit seq', () => {
 
   it('skips a duplicate/backward id and sets gapDetected (0-9 received after 0-10)', () => {
     const state = applyWithIds([
-      [{ type: 'run_init' }, '0-9'],
+      [{ type: 'session_init' }, '0-9'],
       [{ type: 'message_start', role: 'assistant', model: null, message_id: 'msg-1' }, '0-10'],
       [{ type: 'message_start', role: 'assistant', model: null, message_id: 'msg-dup' }, '0-9'],
     ])
@@ -341,7 +341,7 @@ describe('numeric id comparison — multi-digit seq', () => {
 
   it('applies a forward event when same-ms seq crosses digit boundary (…-9 -> …-10)', () => {
     const state = applyWithIds([
-      [{ type: 'run_init' }, '1718000000000-9'],
+      [{ type: 'session_init' }, '1718000000000-9'],
       [{ type: 'message_start', role: 'assistant', model: null, message_id: 'msg-1' }, '1718000000000-10'],
     ])
     expect(state.lastAppliedId).toBe('1718000000000-10')
@@ -365,7 +365,7 @@ describe('gap detection', () => {
     expect(s1.lastAppliedId).toBe('500-0')
 
     // Receive stale event with id "200-0" (already applied).
-    const s2 = reduce(s1, { type: 'run_init' }, '200-0')
+    const s2 = reduce(s1, { type: 'session_init' }, '200-0')
     expect(s2.gapDetected).toBe(true)
     // State is otherwise unchanged.
     expect(s2.messages).toHaveLength(1)

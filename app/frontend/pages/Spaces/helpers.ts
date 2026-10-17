@@ -3,8 +3,9 @@ export type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 export const STATUS_VARIANT: Record<string, BadgeVariant> = {
   pending: 'outline',
   live: 'default',
-  complete: 'secondary',
+  completed: 'secondary',
   failed: 'destructive',
+  // Space status.
   active: 'default',
 }
 

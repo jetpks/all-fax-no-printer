@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import ConversationStream from '@/components/ConversationStream'
+import type { SSEState } from '@/lib/sse-reducer'
 import { isEncryptedThinking } from '@/lib/tools'
 import {
   buildCommandPairs,
@@ -36,6 +38,17 @@ type Props = {
   turns: TurnType[]
 }
 
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+
+// The four capture statuses from the conversations contract — mirrored by
+// Conversations/Index's map for the list rows.
+const STATUS_VARIANT: Record<string, BadgeVariant> = {
+  pending: 'outline',
+  live: 'default',
+  completed: 'secondary',
+  failed: 'destructive',
+}
+
 // A subtle, distinct background tint per turn, cycled by index via the golden
 // angle so adjacent turns never collide. Saturation/lightness ride the
 // --turn-band-s/--turn-band-l custom properties (entrypoints/application.css)
@@ -48,6 +61,11 @@ function turnColor(index: number): string {
 }
 
 export default function Show({ conversation, turns }: Props) {
+  // A capture still landing (ingest mouth not yet terminal) streams in below —
+  // the banner is the page-level signal; the badge is per-row.
+  const isLiveCapture = conversation.status === 'pending' || conversation.status === 'live'
+  const [streamStatus, setStreamStatus] = useState<SSEState['status']>('pending')
+
   // Stable across renders so it's a stable prop for the memoized Turn (and the
   // TOC), not a fresh Map every time activeTurns ticks during a scroll.
   const turnColors = useMemo(
@@ -268,8 +286,12 @@ export default function Show({ conversation, turns }: Props) {
               </p>
             )}
             <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-              {conversation.status} · {turns.length} turns
+              <Badge variant={STATUS_VARIANT[conversation.status] ?? 'outline'}>
+                {conversation.status}
+              </Badge>
+              {turns.length} turns
               {conversation.published && <Badge variant="secondary">published</Badge>}
+              {isLiveCapture && streamStatus === 'live' && <span>· streaming</span>}
             </p>
 
             <dl className="mt-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 text-xs text-muted-foreground">
@@ -320,20 +342,31 @@ export default function Show({ conversation, turns }: Props) {
               <h2 className="text-sm font-semibold text-muted-foreground">Subagent transcripts</h2>
               <ul className="mt-2 divide-y divide-border">
                 {conversation.children.map((child) => (
-                  <li key={child.id} className="py-1.5">
+                  <li key={child.id} className="flex items-center gap-2 py-1.5">
                     <Link href={`/conversations/${child.id}`} className="text-sm hover:underline">
                       {child.title}
                     </Link>
+                    {child.agent_role && (
+                      <Badge variant="outline" className="text-xs">
+                        {child.agent_role}
+                      </Badge>
+                    )}
                   </li>
                 ))}
               </ul>
             </section>
           )}
 
-          {(conversation.status === 'pending' || conversation.status === 'processing') && (
-            <p className="mt-4 text-sm text-muted-foreground">
-              Import in progress — refresh in a moment.
-            </p>
+          {isLiveCapture && (
+            <div data-testid="live-capture" className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm text-muted-foreground">
+                Live — this capture is still landing; its messages stream in below.
+              </p>
+              <ConversationStream
+                conversationId={conversation.id}
+                onStatusChange={setStreamStatus}
+              />
+            </div>
           )}
 
           <ol className="mt-4 space-y-3">

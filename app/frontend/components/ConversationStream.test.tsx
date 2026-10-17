@@ -14,8 +14,8 @@ vi.mock('@inertiajs/react', () => ({
   router: { patch: () => {}, delete: () => {}, post: () => {} },
 }))
 
-// A minimal stand-in for the browser EventSource — see Runs/Show.test.tsx,
-// which exercised this same connect/reconnect logic before it moved here.
+// A minimal stand-in for the browser EventSource — see Conversations/Show.test.tsx,
+// which mounts this component through the page.
 class MockEventSource {
   static instances: MockEventSource[] = []
   url: string
@@ -39,9 +39,9 @@ class MockEventSource {
   }
 }
 
-import RunStream from './RunStream'
+import ConversationStream from './ConversationStream'
 
-describe('RunStream', () => {
+describe('ConversationStream', () => {
   beforeEach(() => {
     MockEventSource.instances = []
     vi.stubGlobal('EventSource', MockEventSource)
@@ -51,14 +51,14 @@ describe('RunStream', () => {
     vi.unstubAllGlobals()
   })
 
-  it('opens a live EventSource for the given run on mount', () => {
-    render(<RunStream runId={1} />)
+  it('opens a live EventSource for the given conversation on mount', () => {
+    render(<ConversationStream conversationId={1} />)
     expect(MockEventSource.instances).toHaveLength(1)
-    expect(MockEventSource.instances[0].url).toBe('/runs/1/stream')
+    expect(MockEventSource.instances[0].url).toBe('/conversations/1/stream')
   })
 
   it('renders streamed content', () => {
-    render(<RunStream runId={1} />)
+    render(<ConversationStream conversationId={1} />)
     const es = MockEventSource.instances[0]
     es.emit({ type: 'message_start', role: 'assistant', model: 'claude' }, '1-1')
     es.emit({ type: 'block_open', block_id: '0', index: 0, block_type: 'text' }, '1-2')
@@ -66,25 +66,20 @@ describe('RunStream', () => {
     expect(screen.queryByText('hello live')).not.toBeNull()
   })
 
-  it('renders the prompt as a leading turn when provided', () => {
-    const { container } = render(<RunStream runId={1} prompt="Write six aphorisms" />)
-    const list = container.querySelector('ol')!
-    expect(list.children[0].textContent).toContain('Write six aphorisms')
-  })
-
-  it('renders no leading turn when prompt is absent', () => {
-    const { container } = render(<RunStream runId={1} />)
-    const list = container.querySelector('ol')!
-    expect(list.children).toHaveLength(0)
-  })
-
   it('reports status transitions via onStatusChange', () => {
     const onStatusChange = vi.fn()
-    render(<RunStream runId={1} onStatusChange={onStatusChange} />)
+    render(<ConversationStream conversationId={1} onStatusChange={onStatusChange} />)
     expect(onStatusChange).toHaveBeenCalledWith('pending')
 
     const es = MockEventSource.instances[0]
     es.emit({ type: 'message_start', role: 'assistant', model: 'claude' }, '1-1')
     expect(onStatusChange).toHaveBeenCalledWith('live')
+  })
+
+  it('closes the EventSource once conversation_complete is seen', () => {
+    render(<ConversationStream conversationId={1} />)
+    const es = MockEventSource.instances[0]
+    es.emit({ type: 'conversation_complete' }, '1-9')
+    expect(es.closed).toBe(true)
   })
 })

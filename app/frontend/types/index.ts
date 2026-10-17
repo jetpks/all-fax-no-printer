@@ -104,6 +104,13 @@ export type ConversationListItem = {
   published: boolean
   turns_count: number
   owned: boolean
+  // Role tag stamped at ingest (architect/builder/judge/…); null = interactive.
+  agent_role: string | null
+  agent_name: string | null
+  model: string | null
+  original_cwd: string | null
+  space_id: number | null
+  updated_at: string
 }
 
 export type Conversation = {
@@ -127,33 +134,14 @@ export type Conversation = {
   parent?: { id: number; title: string } | null
   // Owner-only: subagent transcripts synced from this conversation. Absent
   // for non-owners and anonymous viewers; empty array when there are none.
-  children?: Array<{ id: number; title: string; session_id: string }>
-}
-
-// The five states in config/db/migrate/20260622000000_create_runs.rb's status
-// column (0=pending, 1=live, 2=complete, 3=failed, 4=canceled).
-export type RunStatus = 'pending' | 'live' | 'complete' | 'failed' | 'canceled'
-
-export type Run = {
-  id: number
-  status: RunStatus
-  published: boolean
-  role: string | null
-  harness: string | null
+  children?: Array<{ id: number; title: string; session_id: string; agent_role: string | null }>
+  // Role tag stamped at ingest (architect/builder/judge/…); null = interactive.
+  agent_role: string | null
+  agent_name: string | null
   model: string | null
-  producer: string | null
-  created_at: string
-  updated_at: string
-}
-
-export type RunListItem = {
-  id: number
-  status: RunStatus
-  published: boolean
-  harness: string | null
-  model: string | null
-  lane: string | null
-  created_at: string
+  // The space this capture was filed under via the ingest mouth's space-slug
+  // header; null → grouped by working directory instead.
+  space_id: number | null
 }
 
 // The `?page=N` cursor a list page received alongside its row prop, capped at
@@ -186,9 +174,28 @@ export type SpaceListItem = {
   title: string
   status: string
   iterations_count: number
-  runs_count: number
-  imported_at: string
-  git_utc_offset?: number | null
+  conversations_count: number
+  // May be null — a space with no captured activity yet.
+  last_activity_at: string | null
+}
+
+// A viewer's space-less conversations bucketed by original working directory
+// (the Spaces index's "Unspaced" section).
+export type UnspacedBucket = {
+  cwd: string
+  conversations_count: number
+  last_activity_at: string | null
+}
+
+// A conversation row on the Spaces show timeline.
+export type SpaceConversation = {
+  id: number
+  title: string
+  agent_role: string | null
+  agent_name: string | null
+  status: string
+  model: string | null
+  updated_at: string
 }
 
 export type SpaceArtifact = {
@@ -206,18 +213,6 @@ export type SpaceArtifactDetail = {
   raw: string
 }
 
-export type SpaceRun = {
-  id: number
-  lane: string
-  role: string
-  status: string
-  conversation_id: number
-  iteration_id?: number
-  created_at?: string
-  harness?: string | null
-  model?: string | null
-}
-
 export type SpaceIteration = {
   id: number
   ordinal: number
@@ -229,32 +224,6 @@ export type SpaceIteration = {
   occurred_at_utc_offset?: number | null
   decisions?: { name: string; body: string }[]
   artifacts: SpaceArtifact[]
-  runs: SpaceRun[]
-}
-
-export type ArchitectRun = {
-  id: number
-  role: string
-  status: string
-  session_id: string | null
-  conversation_id: number | null
-  created_at: string
-  occurred_at?: string | null
-  has_transcript?: boolean
-  turns?: Turn[]
-  harness?: string | null
-  model?: string | null
-}
-
-export type SpaceRunDetail = {
-  id: number
-  lane: string
-  role: string
-  status: string
-  producer: string | null
-  session_id: string | null
-  iteration_id: number | null
-  conversation_id: number | null
 }
 
 export type Space = {

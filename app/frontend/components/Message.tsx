@@ -20,8 +20,8 @@ export default function Message({
   showSource: showSourceProp,
 }: {
   message: MessageType
-  // Frozen callers (RunStream's prompt message) still pass this; the annotation
-  // seam it scoped is gone, but the prop stays declared for their sake.
+  // Frozen callers (ConversationStream's live messages) still pass this; the
+  // annotation seam it scoped is gone, but the prop stays declared for their sake.
   conversationId: number
   toolResults?: ToolResultIndex
   commandStdout?: string
