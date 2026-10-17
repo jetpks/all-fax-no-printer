@@ -6,7 +6,6 @@ import {
   ClipboardCopy,
   Code,
   Link as LinkIcon,
-  MessageSquarePlus,
   MoreHorizontal,
 } from 'lucide-react'
 import {
@@ -16,7 +15,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useCanNote } from '@/lib/use-can-note'
 
 // Best-effort clipboard write — the menu is a convenience, so a denied permission
 // or an insecure context fails quietly rather than throwing into the click handler.
@@ -32,10 +30,10 @@ function permalink(anchor: string): string {
 }
 
 // The one menu every bar in the transcript hangs in its top-right corner. It always
-// renders the SAME rows in the same order — fold this, fold all, source / copy / link,
-// annotate — so the menu reads identically everywhere; a bar simply omits the props it
-// can't yet honor and those rows show up disabled rather than missing. (Several are
-// stubbed disabled on purpose until the backing actions land — see the call sites.)
+// renders the SAME rows in the same order — fold this, fold all, source / copy / link —
+// so the menu reads identically everywhere; a bar simply omits the props it can't yet
+// honor and those rows show up disabled rather than missing. (Several are stubbed
+// disabled on purpose until the backing actions land — see the call sites.)
 // Both fold directions are always present, with the one matching the current state
 // disabled, so the row a control lives on never jumps around as you open and close.
 export default function BarMenu({
@@ -44,7 +42,6 @@ export default function BarMenu({
   source,
   copySource,
   anchor,
-  annotate,
   label = 'Row actions',
 }: {
   // Fold this one element; `noun` names it ("turn", "round", "tool"). Omit on bars
@@ -63,14 +60,9 @@ export default function BarMenu({
   copySource?: () => string
   // Anchor id for "Copy link" (e.g. `turn-5`).
   anchor?: string
-  // Open the annotation form (additionally gated on note access below).
-  annotate?: () => void
   // Accessible name for the trigger.
   label?: string
 }) {
-  const canNote = useCanNote()
-  const canAnnotate = Boolean(annotate && canNote)
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -108,12 +100,6 @@ export default function BarMenu({
         </DropdownMenuItem>
         <DropdownMenuItem disabled={!anchor} onClick={() => anchor && copy(permalink(anchor))}>
           <LinkIcon /> Copy link
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem disabled={!canAnnotate} onClick={annotate}>
-          <MessageSquarePlus /> Add note
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

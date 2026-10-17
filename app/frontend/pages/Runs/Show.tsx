@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Head, Link } from '@inertiajs/react'
+import { Head } from '@inertiajs/react'
 import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
 import RunStream from '@/components/RunStream'
@@ -54,23 +54,11 @@ export default function Show({ run }: Props) {
               <dd>{run.role}</dd>
             </div>
           )}
-          {run.job && (
-            <div>
-              <dt className="text-muted-foreground">Job</dt>
-              <dd>
-                <Link href={`/jobs/${run.job.id}`} className="underline underline-offset-2">
-                  #{run.job.id}
-                </Link>
-                {' · '}
-                {run.job.status}
-              </dd>
-            </div>
-          )}
         </dl>
 
       </header>
 
-      <RunStream runId={run.id} prompt={run.job?.prompt} onStatusChange={setStreamStatus} />
+      <RunStream runId={run.id} onStatusChange={setStreamStatus} />
     </AppLayout>
   )
 }

@@ -1,14 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Development launcher — runs the three long-lived dev processes side by side:
+# Development launcher — runs the two long-lived dev processes side by side:
 #   • Vite dev server  (frontend HMR; port 3036 per config/vite.json)
 #   • Falcon           (the Hanami web app on http://localhost:3000)
-#   • Import worker    (dequeues conversation imports from Redis; bin/import_worker.rb)
 #
 # Ctrl-C — or any process exiting — tears them all down cleanly. Runs from any cwd
-# (chdirs to the architect root). For the production-shaped supervised web+worker
-# topology in one host process, use `falcon host falcon.rb` instead.
+# (chdirs to the architect root). For the production-shaped supervised web topology
+# in one host process, use `falcon host falcon.rb` instead.
 #
 # Usage: bin/dev
 
@@ -23,8 +22,7 @@ end
 
 COMMANDS = {
   "vite"   => %w[npx vite],
-  "falcon" => %w[bundle exec falcon serve --bind http://localhost:3000 --count 1],
-  "worker" => %w[bundle exec ruby bin/import_worker.rb]
+  "falcon" => %w[bundle exec falcon serve --bind http://localhost:3000 --count 1]
 }.freeze
 
 # Each child runs in its own process group, so the terminal's Ctrl-C reaches only

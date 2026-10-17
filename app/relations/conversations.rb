@@ -14,8 +14,6 @@ module Space
           associations do
             belongs_to :user
             has_many :messages, view: :ordered_by_position
-            has_many :annotations
-            has_many :conversation_shares, as: :shares
           end
         end
       end

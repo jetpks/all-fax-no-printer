@@ -31,8 +31,6 @@ PATH
 GEM
   remote: https://rubygems.org/
   specs:
-    addressable (2.9.0)
-      public_suffix (>= 2.0.2, < 8.0)
     async (2.39.0)
       console (~> 1.29)
       fiber-annotation
@@ -54,12 +52,6 @@ GEM
       traces (~> 0.10)
     async-http-cache (0.4.6)
       async-http (~> 0.56)
-    async-job (0.11.1)
-      async (~> 2.9)
-      string-format (~> 0.2)
-    async-job-processor-redis (0.3.1)
-      async-job (~> 0.10)
-      async-redis
     async-pool (0.11.2)
       async (>= 2.0)
     async-redis (0.13.1)
@@ -86,13 +78,9 @@ GEM
       fiber-annotation
       fiber-local (~> 1.1)
       json
-    content_disposition (1.0.0)
     csv (3.3.5)
     date (3.5.1)
     dotenv (3.2.0)
-    down (5.6.0)
-      addressable (~> 2.8)
-      base64 (~> 0.3)
     drb (2.2.3)
     dry-auto_inject (1.2.1)
       dry-core (~> 1.1)
@@ -314,7 +302,6 @@ GEM
     psych (5.4.0)
       date
       stringio
-    public_suffix (7.0.5)
     rack (3.2.6)
     rack-protection (4.2.1)
       base64 (>= 0.1.0)
@@ -370,9 +357,6 @@ GEM
       console (~> 1.0)
     sequel (5.105.0)
       bigdecimal
-    shrine (3.8.0)
-      content_disposition (~> 1.0)
-      down (~> 5.1)
     snaky_hash (2.0.6)
       hashie (>= 0.1.0, < 6)
       version_gem (>= 1.1.8, < 3)
@@ -401,8 +385,6 @@ PLATFORMS
   x86_64-linux-musl
 
 DEPENDENCIES
-  async-job (= 0.11.1)
-  async-job-processor-redis (= 0.3.1)
   async-redis (= 0.13.1)
   base64
   bigdecimal
@@ -433,17 +415,13 @@ DEPENDENCIES
   rom-factory (= 0.13.0)
   rom-sql (= 3.7.0)
   sequel (= 5.105.0)
-  shrine (= 3.8.0)
   vite-hanami!
 
 CHECKSUMS
-  addressable (2.9.0) sha256=7fdf6ac3660f7f4e867a0838be3f6cf722ace541dd97767fa42bc6cfa980c7af
   async (2.39.0) sha256=df18730073f2bbb45788077dfa20cb365ecc1b9453969f44de6796b5191a00aa
   async-container (0.35.1) sha256=a7a59914b53c6b3013c71f069cb5ab5a2c7d479e582ea533ce091e8d5cfab525
   async-http (0.95.1) sha256=0c3dd458c204c06d5c4b20b01bbec4794a1203db627fb2ce536e1799ec14786c
   async-http-cache (0.4.6) sha256=2038d1f093182f16b50b4db271c25085e3938da10bfcfc2904cadb0530fddfd6
-  async-job (0.11.1) sha256=6a43c732597d490dd0dabc4fa390faed0b0fde9226a3a33f25979ff356a096a1
-  async-job-processor-redis (0.3.1) sha256=0fb9ec6ab32dc034e20ce280fad89046e81c4b4acf802c5067a17a18ee7c759c
   async-pool (0.11.2) sha256=0a43a17b02b04d9c451b7d12fafa9a50e55dc6dd00d4369aca00433f16a7e3ed
   async-redis (0.13.1) sha256=c3e3a03209257c4e7cbe06dba0ca2856581bc1c583bea7f7fe5974867314ed81
   async-service (0.24.1) sha256=3ee313fa2d6c1427ffac68f42f272889c496fa1088cf1432b1e7a5f5bff56b06
@@ -454,11 +432,9 @@ CHECKSUMS
   bigdecimal (3.3.1) sha256=eaa01e228be54c4f9f53bf3cc34fe3d5e845c31963e7fcc5bedb05a4e7d52218
   concurrent-ruby (1.3.6) sha256=6b56837e1e7e5292f9864f34b69c5a2cbc75c0cf5338f1ce9903d10fa762d5ab
   console (1.36.0) sha256=45599ea906cf80a73d8941f03abf873fe66a6a954e0bac5bc1c01e2cdc406f07
-  content_disposition (1.0.0) sha256=aa153da9c1543a45413a3f5f281d8dd50384bb0fba864fe1bd42ba80d88da516
   csv (3.3.5) sha256=6e5134ac3383ef728b7f02725d9872934f523cb40b961479f69cf3afa6c8e73f
   date (3.5.1) sha256=750d06384d7b9c15d562c76291407d89e368dda4d4fff957eb94962d325a0dc0
   dotenv (3.2.0) sha256=e375b83121ea7ca4ce20f214740076129ab8514cd81378161f11c03853fe619d
-  down (5.6.0) sha256=48ec6ddb078cbf3b425d02596bb388303316f976143c6e94a7b3169d6712b593
   drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
   dry-auto_inject (1.2.1) sha256=dedddc8a13fcdf320def7d6741ce7d6da48d749c6d43175ef0072c0be2ba47c8
   dry-cli (1.4.1) sha256=b8015bb76c708aa8705a36faf694973e75eeeffca39b89c8e172dc6f66a7d874
@@ -541,7 +517,6 @@ CHECKSUMS
   protocol-redis (0.13.0) sha256=e458797120db530469ef8fc04daa1834dba403b5d92033d49ca69eff6c06639d
   protocol-url (0.4.0) sha256=64d4c03b6b51ad815ac6fdaf77a1d91e5baf9220d26becb846c5459dacdea9e1
   psych (5.4.0) sha256=14f72d69a611af663d7d70e4a7b67d9eb1f3ae9f8d916b478961d5a0075ba5b7
-  public_suffix (7.0.5) sha256=1a8bb08f1bbea19228d3bed6e5ed908d1cb4f7c2726d18bd9cadf60bc676f623
   rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
   rack-protection (4.2.1) sha256=cf6e2842df8c55f5e4d1a4be015e603e19e9bc3a7178bae58949ccbb58558bac
   rack-proxy (0.8.2) sha256=d3086e865cbe74e627d41d2c6cd24521206c68d9e0308576760ea06d68e11ab0
@@ -558,7 +533,6 @@ CHECKSUMS
   rom-sql (3.7.0) sha256=56ba0714603d72d7ab5ad3247b6526d04ae83b6fcc807f4a1fa953cd7a65a639
   samovar (2.4.2) sha256=4626ef3d8297cb29dc83a17b562ba52e81116d53fcb7b32096bc453926c3e9ae
   sequel (5.105.0) sha256=4191d5e5d011b7229ff8a3401ca6beac047c4d35b1ec6703376513b4b25b2e67
-  shrine (3.8.0) sha256=658cc1fe1c5ec836a6c10bace7f214313e7d878acea09b6b658fe15fa19ea109
   snaky_hash (2.0.6) sha256=3663cae48cdef582b517025cf8a39d8789996eaf0b4ed89e2f0624836505654a
   string-format (0.2.0) sha256=bc981c14116b061f12134549f32fa2d61a17b5a35dd6fd36596c21722a789af6
   stringio (3.2.0) sha256=c37cb2e58b4ffbd33fe5cd948c05934af997b36e0b6ca6fdf43afa234cf222e1

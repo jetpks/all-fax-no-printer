@@ -19,23 +19,9 @@ module Space
       get  "/conversations", to: "conversations.index"
 
       # Conversations
-      get    "/conversations/new",          to: "conversations.new"
-      post   "/conversations",              to: "conversations.create"
       get    "/conversations/:id",          to: "conversations.show"
       patch  "/conversations/:id/publish",  to: "conversations.publish"
       delete "/conversations/:id",          to: "conversations.destroy"
-
-      # Annotations (nested create, shallow destroy)
-      post   "/conversations/:conversation_id/annotations", to: "annotations.create"
-      delete "/annotations/:id",                            to: "annotations.destroy"
-
-      # Shares (nested CRUD)
-      post   "/conversations/:conversation_id/shares",       to: "shares.create"
-      patch  "/conversations/:conversation_id/shares/:id",   to: "shares.update"
-      delete "/conversations/:conversation_id/shares/:id",   to: "shares.destroy"
-
-      # Entities (derived from messages — full PORO stack)
-      get "/conversations/:conversation_id/entities/:address", to: "entities.show"
 
       # Messages (shallow member — publish toggle)
       patch "/messages/:id/publish", to: "messages.publish"
@@ -47,30 +33,8 @@ module Space
       get  "/runs/:id/stream",  to: "runs.stream"
       get  "/runs/:id",         to: "runs.show"
 
-      # Jobs (inference-job queue + browser UI — I06/I10; /jobs/new before /jobs/:id,
-      # same precedent as conversations/new above)
-      get  "/jobs",            to: "jobs.index"
-      get  "/jobs/new",        to: "jobs.new"
-      post "/jobs",            to: "jobs.create"
-      get  "/jobs/:id",        to: "jobs.show"
-      post "/jobs/:id/cancel", to: "jobs.cancel"
-
-      # Profiles (harness profiles — user-owned partial job specs, I20)
-      get  "/profiles",            to: "profiles.index"
-      get  "/profiles/new",        to: "profiles.new"
-      post "/profiles",            to: "profiles.create"
-      post "/profiles/:id/delete", to: "profiles.destroy"
-
-      # Providers (inference providers — user-owned rows, I22)
-      get  "/providers",             to: "providers.index"
-      get  "/providers/new",         to: "providers.new"
-      post "/providers",             to: "providers.create"
-      post "/providers/:id/delete",  to: "providers.destroy"
-      get  "/providers/:id/models",  to: "providers.models"
-      get  "/providers/:id/pi_extension", to: "providers.pi_extension"
-
       # API tokens (per-user machine auth — mint/revoke; session-auth'd UI,
-      # same convention as profiles/providers: POST …/delete for the revoke)
+      # POST …/delete for the revoke)
       get  "/api_tokens",            to: "api_tokens.index"
       get  "/api_tokens/new",        to: "api_tokens.new"
       post "/api_tokens",            to: "api_tokens.create"
@@ -78,10 +42,6 @@ module Space
 
       # Spaces
       get "/spaces",                    to: "spaces.index"
-      # Bundle ingest (I04): POST /spaces/import. A distinct method from the
-      # GET /spaces/:id routes, and named statically, so it resolves to
-      # spaces.import — never spaces.show with id="import".
-      post "/spaces/import",            to: "spaces.import"
       get "/spaces/:id",                to: "spaces.show"
       get "/spaces/:id/runs/:run_id",                        to: "spaces.run"
       get "/spaces/:id/runs/:run_id/transcript",             to: "spaces.transcript"

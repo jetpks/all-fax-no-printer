@@ -99,56 +99,6 @@ class RunsIndexTest < Minitest::Test
     assert_equal "builder-a",  run["lane"]
   end
 
-  def test_index_prompt_snippet_present_for_owner_with_job
-    sign_in(@owner)
-    run = Factory[:run, user_id: @owner.id, published: false]
-    Factory[:job, user_id: @owner.id, run_id: run.id, spec: { "harness" => { "type" => "claude" }, "prompt" => "do the thing" }]
-
-    _, _, body = inertia_get("/runs")
-    entry = parse_json(body)["props"]["runs"].find { |r| r["id"] == run.id }
-    assert_equal "do the thing", entry["prompt_snippet"]
-  end
-
-  def test_index_prompt_snippet_truncated_and_single_line
-    sign_in(@owner)
-    run = Factory[:run, user_id: @owner.id, published: false]
-    long_prompt = "line one\nline two #{"x" * 150}"
-    Factory[:job, user_id: @owner.id, run_id: run.id, spec: { "harness" => { "type" => "claude" }, "prompt" => long_prompt }]
-
-    _, _, body = inertia_get("/runs")
-    entry = parse_json(body)["props"]["runs"].find { |r| r["id"] == run.id }
-    refute_includes entry["prompt_snippet"], "\n"
-    assert_equal 141, entry["prompt_snippet"].length
-    assert entry["prompt_snippet"].end_with?("…")
-  end
-
-  def test_index_prompt_snippet_nil_for_non_owner
-    run = Factory[:run, user_id: @owner.id, published: true]
-    Factory[:job, user_id: @owner.id, run_id: run.id, spec: { "harness" => { "type" => "claude" }, "prompt" => "secret plan" }]
-
-    sign_in(@other)
-    _, _, body = inertia_get("/runs")
-    entry = parse_json(body)["props"]["runs"].find { |r| r["id"] == run.id }
-    assert_nil entry["prompt_snippet"]
-  end
-
-  def test_index_prompt_snippet_nil_for_anon
-    run = Factory[:run, user_id: @owner.id, published: true]
-    Factory[:job, user_id: @owner.id, run_id: run.id, spec: { "harness" => { "type" => "claude" }, "prompt" => "secret plan" }]
-
-    _, _, body = inertia_get("/runs")
-    entry = parse_json(body)["props"]["runs"].find { |r| r["id"] == run.id }
-    assert_nil entry["prompt_snippet"]
-  end
-
-  def test_index_prompt_snippet_nil_when_no_job
-    Factory[:run, user_id: @owner.id, published: true]
-    sign_in(@owner)
-    _, _, body = inertia_get("/runs")
-    entry = parse_json(body)["props"]["runs"].first
-    assert_nil entry["prompt_snippet"]
-  end
-
   # --- pagination (I45) ---------------------------------------------------
 
   def test_index_pagination_default_page_1_capped_with_prop
@@ -177,32 +127,5 @@ class RunsIndexTest < Minitest::Test
     3.times { Factory[:run, user_id: @owner.id, published: true] }
     _, _, body = inertia_get("/runs")
     refute parse_json(body).dig("props", "pagination", "has_more")
-  end
-
-  # Recording logger stand-in — Sequel::Database#loggers accepts anything
-  # responding to the Logger interface; #info is what Sequel calls per query.
-  class SqlSpy
-    attr_reader :statements
-    def initialize = @statements = []
-    def info(msg) = @statements << msg
-    def method_missing(*) = nil
-    def respond_to_missing?(*) = true
-  end
-
-  def test_index_resolves_jobs_with_a_single_bulk_query
-    sign_in(@owner)
-    3.times do
-      run = Factory[:run, user_id: @owner.id, published: false]
-      Factory[:job, user_id: @owner.id, run_id: run.id]
-    end
-
-    connection = Space::Server::App["db.gateway"].connection
-    spy = SqlSpy.new
-    connection.loggers << spy
-    inertia_get("/runs")
-    connection.loggers.delete(spy)
-
-    job_queries = spy.statements.select { |sql| sql.include?(%(FROM "jobs")) }
-    assert_equal 1, job_queries.length, "expected exactly one query against jobs (bulk by_run_ids), got #{job_queries.length}"
   end
 end

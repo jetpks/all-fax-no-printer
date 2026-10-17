@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { Conversation } from '@/types'
 
@@ -35,30 +35,14 @@ const CONVERSATION: Conversation = {
   git_branch: null,
   agent_version: null,
   can_manage: false,
-  can_note: false,
   owner: { username: 'eric', name: null, avatar_url: null },
 }
 
 function renderShow(conversation: Conversation) {
-  return render(
-    <Show conversation={conversation} turns={[]} annotations={[]} shares={null} />,
-  )
+  return render(<Show conversation={conversation} turns={[]} />)
 }
 
 describe('Conversations/Show', () => {
-  beforeEach(() => {
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }))
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('renders a parent link when parent is present', () => {
     const conversation = { ...CONVERSATION, parent: { id: 3, title: 'Parent session' } }
     renderShow(conversation)

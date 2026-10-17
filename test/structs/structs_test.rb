@@ -11,7 +11,7 @@ class StructsTest < Minitest::Test
   def setup
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :users].each do |t|
+    [:messages, :conversations, :users].each do |t|
       conn[t].delete
     end
   end
@@ -19,7 +19,6 @@ class StructsTest < Minitest::Test
   def conversations_repo = Space::Server::Repos::ConversationsRepo.new
   def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def users_repo         = Space::Server::Repos::UsersRepo.new
-  def annotations_repo   = Space::Server::Repos::AnnotationsRepo.new
 
   # --- Conversation: status enum coercion (all 4 values) ------------------
 
@@ -88,33 +87,5 @@ class StructsTest < Minitest::Test
     user  = Factory[:user]
     found = users_repo.by_pk(user.id)
     assert_kind_of Space::Server::Structs::User, found
-  end
-
-  # --- Annotation: selector JSONB surfaces as Ruby Hash -------------------
-
-  def test_annotation_selector_hash
-    conv = Factory[:conversation]
-    user = Factory[:user]
-    sel  = { "exact" => "text", "position" => 5 }
-    ann  = Factory[:annotation, conversation_id: conv.id, user_id: user.id, selector: sel]
-    found = annotations_repo.by_pk(ann.id)
-    assert_kind_of Hash, found.selector
-    assert_equal "text", found.selector["exact"]
-  end
-
-  def test_annotation_selector_nil_when_not_set
-    conv = Factory[:conversation]
-    user = Factory[:user]
-    ann  = Factory[:annotation, conversation_id: conv.id, user_id: user.id]
-    found = annotations_repo.by_pk(ann.id)
-    assert_nil found.selector
-  end
-
-  def test_annotation_struct_class
-    conv = Factory[:conversation]
-    user = Factory[:user]
-    ann  = Factory[:annotation, conversation_id: conv.id, user_id: user.id]
-    found = annotations_repo.by_pk(ann.id)
-    assert_kind_of Space::Server::Structs::Annotation, found
   end
 end

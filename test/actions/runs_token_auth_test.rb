@@ -8,7 +8,7 @@ class RunsTokenAuthTest < Minitest::Test
 
   TOKEN = "ingest-secret-test-token-deadbeef0123456789"
 
-  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "claude_code_stream_text.jsonl"))
+  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"))
 
   def setup
     setup_db

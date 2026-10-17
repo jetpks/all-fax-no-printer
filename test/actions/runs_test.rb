@@ -75,8 +75,8 @@ class RunsActionTest < Minitest::Test
     assert data.key?("error")
   end
 
-  MINIMAL_JSONL = "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"/test\",\"session_id\":\"test\",\"tools\":[],\"model\":\"test\"}\n"
-  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "claude_code_stream_text.jsonl"))
+  MINIMAL_JSONL = "{\"type\":\"session\",\"version\":3,\"id\":\"minimal\",\"cwd\":\"/test\"}\n"
+  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"))
 
   def test_ingest_owner_with_jsonl_body_returns_202_and_events
     sign_in(@owner)
@@ -101,14 +101,15 @@ class RunsActionTest < Minitest::Test
     refute_equal :pending, updated.status, "run status must not remain :pending after ingest"
   end
 
-  def test_ingest_with_result_line_transitions_run_to_complete
+  def test_ingest_pi_fixture_transitions_run_to_complete
     sign_in(@owner)
     run = Factory[:run, user_id: @owner.id, status: 0]
     Sync do
       post_raw("/runs/#{run.id}/ingest", body: FIXTURE_JSONL)
     end
     updated = @runs_repo.by_pk(run.id)
-    assert_equal :complete, updated.status, "run status must be :complete when fixture contains result line"
+    assert_equal :complete, updated.status,
+      "pi's clean-EOF completion semantics must drive :complete"
   end
 
   def test_ingest_empty_body_returns_202_failed_zero_events
@@ -134,7 +135,9 @@ class RunsActionTest < Minitest::Test
       assert_equal 202, status
       data = parse_json(body)
       assert_equal 1, data["events"]
-      assert_equal "live", data["status"]
+      # pi has no completion sentinel: clean EOF after the parser engaged is
+      # itself the completion signal, so a session-only stream ends complete.
+      assert_equal "complete", data["status"]
     end
   end
 

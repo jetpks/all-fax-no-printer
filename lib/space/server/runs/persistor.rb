@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "../nul_scrub"
 
 module Space
   module Server
@@ -110,7 +111,7 @@ module Space
             conversation_id: @conversation_id,
             role:            @current_msg[:role],
             model:           @current_msg[:model],
-            content:         Space::Server::Importers::NulScrub.scrub_nul(@current_msg[:ordered]),
+            content:         Space::Server::NulScrub.scrub_nul(@current_msg[:ordered]),
             position:        @position,
             published:       false,
             created_at:      Time.now,
@@ -128,7 +129,7 @@ module Space
           @messages_repo.create(
             conversation_id: @conversation_id,
             role:            "user",
-            content:         Space::Server::Importers::NulScrub.scrub_nul(
+            content:         Space::Server::NulScrub.scrub_nul(
                                [{ "type" => "tool_result", "tool_use_id" => event[:tool_use_id],
                                   "content" => event[:content], "is_error" => event[:is_error] }]
                              ),

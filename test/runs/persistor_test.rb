@@ -8,7 +8,7 @@ class PersistorTest < Minitest::Test
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user              = Factory[:user]
     @conversations_repo = Space::Server::App["repos.conversations_repo"]
     @messages_repo      = Space::Server::App["repos.messages_repo"]

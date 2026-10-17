@@ -24,13 +24,8 @@ gem "hanami-router", "2.3.1"
 # Async server
 gem "falcon", "0.55.5"
 
-# Async job queue (web side enqueues, worker process dequeues)
-gem "async-job", "0.11.1"
-gem "async-job-processor-redis", "0.3.1"
+# Redis (display streams for the runs chain; sole consumer: config/providers/redis.rb)
 gem "async-redis", "0.13.1"
-
-# File attachments
-gem "shrine", "3.8.0"
 
 # Persistence
 gem "rom", "5.4.3"

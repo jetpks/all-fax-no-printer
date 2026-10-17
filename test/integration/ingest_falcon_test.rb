@@ -37,7 +37,7 @@ Protocol::Rack::Input.prepend(Module.new do
 end)
 
 class IngestFalconTest < Minitest::Test
-  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "claude_code_stream_text.jsonl"))
+  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"))
   # Expected event count is what the normalizer emits, not raw line count.
   # Computed once using a noop redis so no side effects at load time.
   FIXTURE_EVENT_COUNT = begin
@@ -55,7 +55,7 @@ class IngestFalconTest < Minitest::Test
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user  = Factory[:user]
     @run   = Factory[:run, user_id: @user.id, status: 0]
     @redis = Space::Server::App["redis"]
@@ -102,8 +102,10 @@ class IngestFalconTest < Minitest::Test
                 "AC5: response events must equal fixture count (#{FIXTURE_EVENT_COUNT})"
 
               xlen = @redis.call("XLEN", "run:#{@run.id}")
-              assert_equal FIXTURE_EVENT_COUNT, xlen,
-                "AC5: Redis XLEN must equal fixture count (#{FIXTURE_EVENT_COUNT})"
+              # pi never emits run_complete itself; ingest synthesizes the
+              # terminal frame — one stream entry beyond the event count.
+              assert_equal FIXTURE_EVENT_COUNT + 1, xlen,
+                "AC5: Redis XLEN must equal fixture count + synthetic terminal (#{FIXTURE_EVENT_COUNT})"
 
               # AC6: body must not have been drained by the router before the action.
               assert_equal 0, INGEST_FALCON_PRE_ACTION_READS.size,

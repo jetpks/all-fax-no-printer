@@ -78,26 +78,4 @@ class RunsShowTest < Minitest::Test
     assert props.key?("updated_at")
   end
 
-  def test_show_includes_job_for_owner
-    sign_in(@owner)
-    run = Factory[:run, user_id: @owner.id, status: 2, published: true]
-    job = Factory[:job, user_id: @owner.id, status: "succeeded", run_id: run.id]
-    _, _, body = inertia_get("/runs/#{run.id}")
-    props = parse_json(body)["props"]["run"]
-    assert_equal job.id,         props["job"]["id"]
-    assert_equal "succeeded",    props["job"]["status"]
-    assert_equal "do the thing", props["job"]["prompt"]
-  end
-
-  def test_show_omits_job_for_anon_and_non_owner
-    run = Factory[:run, user_id: @owner.id, status: 2, published: true]
-    Factory[:job, user_id: @owner.id, status: "succeeded", run_id: run.id]
-
-    _, _, body = inertia_get("/runs/#{run.id}")
-    assert_nil parse_json(body)["props"]["run"]["job"]
-
-    sign_in(@other)
-    _, _, body = inertia_get("/runs/#{run.id}")
-    assert_nil parse_json(body)["props"]["run"]["job"]
-  end
 end

@@ -38,9 +38,6 @@ export default function Index({ runs, pagination }: Props) {
                     </span>
                   )}
                 </Link>
-                {r.prompt_snippet && (
-                  <p className="mt-1 truncate text-sm text-muted-foreground">{r.prompt_snippet}</p>
-                )}
               </div>
               <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={STATUS_VARIANT[r.status] ?? 'outline'}>{r.status}</Badge>
