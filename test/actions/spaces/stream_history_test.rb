@@ -88,7 +88,7 @@ class SpacesStreamHistoryActionTest < Minitest::Test
       # Envelope parity with the SSE stream: id form and merged keys.
       first = json["events"].first
       assert_equal "#{conv_a.id}:#{a_ms}", first["id"]
-      assert_equal "coord", first["data"]["tag"], "prefix-stripped role must still abbreviate"
+      assert_equal "architect-coordinator", first["data"]["tag"]
       assert_equal "coordinator", first["data"]["agent_role"]
       assert_equal "architect-coordinator", first["data"]["agent_name"]
     ensure

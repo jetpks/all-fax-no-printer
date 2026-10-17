@@ -7,20 +7,10 @@ module Space
     module Spaces
       # The space stream's event-envelope contract, shared by the SSE mux
       # action and the space history endpoint: envelope merge (conversation_id
-      # / agent_role / agent_name / tag), the frozen display tag map, and
-      # numeric entry-id ordering (a string compare is wrong at seq ≥ 10).
-      # Entry-id bound parsing lives in StreamWindow (shared beyond spaces).
+      # / agent_role / agent_name / tag) and numeric entry-id ordering (a string
+      # compare is wrong at seq ≥ 10). Entry-id bound parsing lives in
+      # StreamWindow (shared beyond spaces).
       module StreamEvents
-        # Display tag map (frozen): the agent's role abbreviates when known;
-        # otherwise a truncated agent name; otherwise the bare conversation id.
-        ROLE_ABBREV = {
-          "architect-coordinator" => "coord",
-          "architect-spec" => "spec",
-          "architect-judge" => "judge",
-          "architect-builder" => "bld",
-          "architect-narrator" => "narr"
-        }.freeze
-
         module_function
 
         # The envelope-merged event object: the entry's data JSON (degraded to
@@ -59,18 +49,18 @@ module Space
           idx ? fields[idx + 1] : nil
         end
 
-        # looplog 9.5.0 parity (tag_label): known architect agents abbreviate
-        # by their FULL agent name; unknown names clip to 10 chars. ingest
-        # stores agent_name as the full name and agent_role as the name minus
-        # the "architect-" prefix (session-sink agentRoleFor), so both forms
-        # hit the map; a conversation with neither name nor role falls back to
-        # the bare id.
+        # The display tag: the full agent name, verbatim — no abbrev map to
+        # keep in sync, forwards compatible with new roles (looplog 9.6.0
+        # parity). ingest stores agent_name as the full name and agent_role as
+        # the name minus the "architect-" prefix (session-sink agentRoleFor);
+        # the name wins, the stripped role shows as-is when it's all there is,
+        # and a conversation with neither falls back to the bare id.
         def tag(conversation_id, agent_role, agent_name)
           name = agent_name.to_s
-          abbrev = ROLE_ABBREV[name] || ROLE_ABBREV["architect-#{agent_role}"]
-          return abbrev if abbrev
+          return name unless name.empty?
 
-          name.empty? ? "conv-#{conversation_id}" : name[0, 10]
+          role = agent_role.to_s
+          role.empty? ? "conv-#{conversation_id}" : role
         end
 
         # The delivered cursor comparison: the entry is at or before the cursor.

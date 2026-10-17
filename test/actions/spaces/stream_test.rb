@@ -167,14 +167,12 @@ class SpacesStreamActionTest < Minitest::Test
         assert_kind_of String, data["tag"]
       end
 
-      # Frozen tag map (looplog 9.5.0 parity): production stores agent_name as
-      # the full agent name and agent_role as the name minus the "architect-"
-      # prefix (session-sink) — either form abbreviates; an unknown name clips
-      # to 10 chars; neither → conv-id fallback.
+      # Frozen tag behavior (looplog 9.6.0 parity): the full agent name,
+      # verbatim — no abbrev map; the stripped role shows as-is when it's all
+      # there is; neither → conv-id fallback.
       by_conversation = events.group_by { |id, _| id.split(":").first }
-      assert_equal "coord", by_conversation[conv_a.id.to_s].first[1]["tag"],
-                  "role comes prefix-stripped from ingest — the abbrev must still hit"
-      assert_equal "Navi the N", by_conversation[conv_b.id.to_s].first[1]["tag"]
+      assert_equal "architect-coordinator", by_conversation[conv_a.id.to_s].first[1]["tag"]
+      assert_equal "Navi the Navigator", by_conversation[conv_b.id.to_s].first[1]["tag"]
       assert_equal "conv-#{conv_c.id}", by_conversation[conv_c.id.to_s].first[1]["tag"]
       assert_equal conv_a.id, by_conversation[conv_a.id.to_s].first[1]["conversation_id"]
       assert_equal "coordinator", by_conversation[conv_a.id.to_s].first[1]["agent_role"]
@@ -332,7 +330,7 @@ class SpacesStreamActionTest < Minitest::Test
         assert_equal conv.id, data["conversation_id"]
         assert_equal "builder", data["agent_role"]
         assert_equal "architect-builder", data["agent_name"]
-        assert_equal "bld", data["tag"]
+        assert_equal "architect-builder", data["tag"]
       ensure
         redis_client&.close
         Space::Server::Spaces::StreamMux.stop(space.id)
