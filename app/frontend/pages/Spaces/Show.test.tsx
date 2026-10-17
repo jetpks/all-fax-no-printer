@@ -15,8 +15,8 @@ vi.mock('@/layouts/AppLayout', () => ({
   default: ({ children }: { children?: ReactNode }) => <div data-testid="layout">{children}</div>,
 }))
 
-// LiveLog opens a real EventSource on mount — stub it (same pattern as
-// ConversationStream.test.tsx) so the page renders offline.
+// LiveLog opens a real EventSource on mount — stub it (same stub pattern as
+// the other page tests) so the page renders offline.
 class MockEventSource {
   static instances: MockEventSource[] = []
   url: string

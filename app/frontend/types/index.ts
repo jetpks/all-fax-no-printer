@@ -234,6 +234,10 @@ export type SpaceIteration = {
   artifacts: SpaceArtifact[]
 }
 
+// An SSE event payload parsed from the `data:` field of a server-sent event.
+// The `type` field determines how it is handled; all other fields are event-specific.
+export type SSEEvent = { type: string; [key: string]: unknown }
+
 export type Space = {
   id: number
   slug: string

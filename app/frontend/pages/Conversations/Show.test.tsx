@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { Conversation } from '@/types'
+import type { Conversation, Message as MessageType, Turn as TurnType } from '@/types'
 
 vi.mock('@inertiajs/react', () => ({
   Head: (_props: { title?: string }) => null,
@@ -23,11 +23,10 @@ vi.mock('@/layouts/AppLayout', () => ({
   default: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }))
 
-// Isolate the live view; the stream component's own behavior is covered by
-// ConversationStream.test.tsx.
-vi.mock('@/components/ConversationStream', () => ({
+// Isolate the live log; its own behavior is covered by LiveLog.test.tsx.
+vi.mock('@/components/LiveLog', () => ({
   default: ({ conversationId }: { conversationId: number }) => (
-    <div data-testid="conversation-stream">stream-{conversationId}</div>
+    <div data-testid="live-log">live-log-{conversationId}</div>
   ),
 }))
 
@@ -50,8 +49,46 @@ const CONVERSATION: Conversation = {
   space_id: null,
 }
 
-function renderShow(conversation: Conversation) {
-  return render(<Show conversation={conversation} turns={[]} />)
+function makeMessage(id: number, blocks: MessageType['blocks']): MessageType {
+  return {
+    id,
+    role: 'assistant',
+    model: null,
+    position: id,
+    published: false,
+    can_publish: false,
+    blocks,
+  }
+}
+
+// A turn whose reply holds a narrative message and a decision-marked action
+// message (an AskUserQuestion call), so the flat-body shape and the marker
+// jump both have something real to land on.
+function makeTurn(): TurnType {
+  return {
+    anchor_id: 12,
+    prompt: makeMessage(21, [{ type: 'text', text: 'pick a color' }]),
+    rounds: [
+      {
+        anchor_id: 22,
+        messages: [
+          makeMessage(22, [{ type: 'text', text: 'let me ask.' }]),
+          makeMessage(23, [
+            {
+              type: 'tool_use',
+              id: 'tu-1',
+              name: 'AskUserQuestion',
+              input: { questions: [{ header: 'Hue', question: 'Which hue?' }] },
+            },
+          ]),
+        ],
+      },
+    ],
+  }
+}
+
+function renderShow(conversation: Conversation, turns: TurnType[] = []) {
+  return render(<Show conversation={conversation} turns={turns} />)
 }
 
 describe('Conversations/Show', () => {
@@ -112,31 +149,89 @@ describe('Conversations/Show', () => {
 })
 
 describe('Conversations/Show — live capture mount', () => {
-  it('mounts the live stream when the capture is pending', () => {
+  it('mounts the LiveLog when the capture is pending', () => {
     renderShow({ ...CONVERSATION, status: 'pending' })
 
     expect(screen.getByTestId('live-capture')).not.toBeNull()
-    expect(screen.getByTestId('conversation-stream')).not.toBeNull()
+    expect(screen.getByTestId('live-log')).not.toBeNull()
   })
 
-  it('mounts the live stream when the capture is live', () => {
+  it('mounts the LiveLog when the capture is live', () => {
     renderShow({ ...CONVERSATION, status: 'live' })
 
     expect(screen.getByTestId('live-capture')).not.toBeNull()
-    expect(screen.getByTestId('conversation-stream')).not.toBeNull()
+    expect(screen.getByTestId('live-log')).not.toBeNull()
   })
 
-  it('does not mount the stream once the capture is terminal', () => {
+  it('does not mount the live section once the capture is terminal', () => {
     for (const status of ['completed', 'failed']) {
       const { container } = renderShow({ ...CONVERSATION, status })
       expect(container.querySelector('[data-testid="live-capture"]')).toBeNull()
-      expect(container.querySelector('[data-testid="conversation-stream"]')).toBeNull()
+      expect(container.querySelector('[data-testid="live-log"]')).toBeNull()
     }
   })
 
   it('streams the mounted conversation by its id', () => {
     renderShow({ ...CONVERSATION, status: 'live' })
 
-    expect(screen.getByTestId('conversation-stream').textContent).toBe('stream-5')
+    expect(screen.getByTestId('live-log').textContent).toBe('live-log-5')
+  })
+})
+
+describe('Conversations/Show — flat body', () => {
+  afterEach(() => {
+    window.location.hash = ''
+  })
+
+  it('renders one #turn-<anchorId> container per turn', () => {
+    const turns: TurnType[] = [makeTurn(), { ...makeTurn(), anchor_id: 13 }]
+    const { container } = renderShow({ ...CONVERSATION, status: 'completed' }, turns)
+
+    const lis = container.querySelectorAll('li[data-turn-id]')
+    expect(lis).toHaveLength(2)
+    expect(container.querySelector('#turn-12')).not.toBeNull()
+    expect(container.querySelector('#turn-13')).not.toBeNull()
+  })
+
+  it('hangs prompt-<id> on the prompt', () => {
+    renderShow({ ...CONVERSATION, status: 'completed' }, [makeTurn()])
+
+    expect(document.querySelector('#prompt-21')?.textContent).toContain('pick a color')
+  })
+
+  it('a marker deep link scrolls to and expands the target action row', () => {
+    renderShow({ ...CONVERSATION, status: 'completed' }, [makeTurn()])
+    // jsdom has no scrollIntoView.
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+
+    // The decision row starts collapsed: the question text is not rendered.
+    expect(screen.queryByText('Which hue?')).toBeNull()
+
+    act(() => {
+      window.location.hash = '#decision-23'
+      window.dispatchEvent(new Event('hashchange'))
+    })
+
+    // The action row expanded in place — the question card is now rendered.
+    expect(screen.getByText('Which hue?')).not.toBeNull()
+  })
+
+  it('a #round-<id> fragment degrades to #message-<id> (the round anchor is a message id)', () => {
+    renderShow({ ...CONVERSATION, status: 'completed' }, [makeTurn()])
+    window.HTMLElement.prototype.scrollIntoView = vi.fn()
+
+    act(() => {
+      window.location.hash = '#round-22'
+      window.dispatchEvent(new Event('hashchange'))
+    })
+
+    // Rounds no longer render as containers; the flash lands on the message.
+    expect(document.querySelector('.anchor-flash#message-22')).not.toBeNull()
+  })
+
+  it('no conversation-stream testid anywhere', () => {
+    const { container } = renderShow({ ...CONVERSATION, status: 'live' }, [makeTurn()])
+
+    expect(container.innerHTML).not.toContain('conversation-stream')
   })
 })
