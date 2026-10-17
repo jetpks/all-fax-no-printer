@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 // Types only — the SSE event vocabulary lives in '@/types' alongside the rest
 // of the wire shapes.
 import type { SSEEvent } from '@/types'
@@ -18,6 +18,17 @@ export type LiveLogProps = {
 // Frozen truncation budget (looplog's RUNLOG_LIMIT parity): tool args and
 // tool results clip to this many characters per line.
 export const LIVE_LOG_LIMIT = 2000
+
+// Initial replay window: the streams send only the last TAIL_MESSAGES messages
+// (?tail=, message-boundary windowed server-side). Older pages load on upward
+// scroll (PAGE_MESSAGES at a time) from the /stream/history endpoints.
+export const TAIL_MESSAGES = 20
+export const PAGE_MESSAGES = 100
+
+// Within this many px of the bottom counts as pinned (new lines follow);
+// scrolling this close to the top loads a history page.
+const PIN_BOTTOM_PX = 24
+const TOP_LOAD_PX = 48
 
 // looplog TAG_COLORS parity (36 35 33 32 34 95 96 91) as Tailwind CSS color
 // classes. Space-mode lines hash their conversation_id over this palette
@@ -97,6 +108,10 @@ function emptyConv(): ConvAcc {
 }
 
 const emptyState: LogState = { convs: {}, entries: [] }
+
+// One retained raw frame (the SSE id plus the applied event) — the store the
+// history pager prepends into and rebuilds the rendered state from.
+type Frame = { sseId: string | null; convId: number; event: SSEEvent }
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : ''
@@ -329,18 +344,32 @@ export default function LiveLog(props: LiveLogProps) {
   // re-sync can always tear down whatever is currently open before starting
   // the next one — never two subscriptions alive at once.
   const esRef = useRef<EventSource | null>(null)
+  // Retained raw frames (chronological): the initial ?tail window plus live
+  // events, prepended into by the history pager and reduced back through
+  // applyFrame to rebuild rendered state after a page lands.
+  const framesRef = useRef<Frame[]>([])
+  const scrollRef = useRef<HTMLElement | null>(null)
+  const pinnedRef = useRef(true) // follow the bottom while the user hasn't scrolled up
+  const loadingRef = useRef(false) // one history fetch in flight at a time
+  const anchorRef = useRef<number | null>(null) // scrollHeight to restore after a prepend
+  const [showJump, setShowJump] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   // Conversation-mode terminal flag, readable from the visibilitychange handler
   // (which closes over a stale closure otherwise) and the error path.
   const doneRef = useRef(false)
 
   const connect = useCallback(() => {
     esRef.current?.close()
-    // Fresh stream state: a reconnect replays the capture from the top (Redis
+    // Fresh stream state: a reconnect replays the capture from its tail (Redis
     // backlog or db_replay), so stale accumulated lines must not linger.
+    framesRef.current = []
     setState(emptyState)
     doneRef.current = false
+    pinnedRef.current = true
+    setShowJump(false)
+    setHasMore(true)
 
-    const es = new EventSource(url)
+    const es = new EventSource(`${url}?tail=${TAIL_MESSAGES}`)
 
     es.onmessage = (e: MessageEvent) => {
       try {
@@ -349,7 +378,9 @@ export default function LiveLog(props: LiveLogProps) {
         // conversation events don't (the URL names the conversation).
         const convId = spaceMode ? Number(event.conversation_id) : (convModeId as number)
         if (!Number.isFinite(convId)) return
-        setState((prev) => applyFrame(prev, convId, event, e.lastEventId || null, !spaceMode))
+        const frame: Frame = { sseId: e.lastEventId || null, convId, event }
+        framesRef.current.push(frame)
+        setState((prev) => applyFrame(prev, convId, event, frame.sseId, !spaceMode))
         // Conversation mode: conversation_complete is terminal — close (the capture
         // has finished landing). Space mode NEVER closes: the stream is
         // long-lived and native reconnect carries Last-Event-ID.
@@ -389,13 +420,95 @@ export default function LiveLog(props: LiveLogProps) {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [connect, spaceMode])
 
+  // One upward history page: fetch the PAGE_MESSAGES messages strictly before
+  // the oldest retained frame, prepend them, and rebuild rendered state from
+  // the full frame list (the reducer is deterministic — same frames, same
+  // lines; dedup rides the per-conversation lastId check as always).
+  const loadHistory = useCallback(async () => {
+    if (loadingRef.current || !hasMore) return
+    const oldest = framesRef.current[0]
+    if (!oldest) return // nothing retained yet — nothing to page below
+    if (!oldest.sseId) {
+      // db_replay frames carry no ids — there is no bound to page below.
+      setHasMore(false)
+      return
+    }
+    const before = oldest.sseId
+
+    loadingRef.current = true
+    try {
+      const base = spaceMode ? `/spaces/${spaceModeId}/stream/history` : `/conversations/${convModeId}/stream/history`
+      const res = await fetch(`${base}?before=${encodeURIComponent(before)}&limit=${PAGE_MESSAGES}`)
+      if (!res.ok) {
+        setHasMore(false)
+        return
+      }
+      const page = (await res.json()) as { events: { id: string; data: SSEEvent & { conversation_id?: unknown } }[]; more: boolean }
+      const frames: Frame[] = page.events.map(({ id, data }) => ({
+        sseId: id,
+        convId: spaceMode ? Number(data.conversation_id) : (convModeId as number),
+        event: data,
+      }))
+
+      // Restore the scroll position after the prepend: record the current
+      // height, let the layout effect set scrollTop from the new one.
+      const el = scrollRef.current
+      anchorRef.current = el ? el.scrollHeight : null
+      framesRef.current = [...frames, ...framesRef.current]
+      setState(framesRef.current.reduce(
+        (st, f) => applyFrame(st, f.convId, f.event, f.sseId, !spaceMode),
+        emptyState,
+      ))
+      setHasMore(page.more)
+    } catch {
+      setHasMore(false)
+    } finally {
+      loadingRef.current = false
+    }
+  }, [hasMore, spaceMode, spaceModeId, convModeId])
+
+  // Pin-to-bottom panel: while the user is at (or near) the bottom, new lines
+  // keep it scrolled to the bottom; scrolling up un-pins (reading mode) and
+  // near the top pages a history window in.
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_BOTTOM_PX
+    pinnedRef.current = atBottom
+    setShowJump(!atBottom)
+    if (el.scrollTop <= TOP_LOAD_PX) void loadHistory()
+  }, [loadHistory])
+
+  const jumpToBottom = useCallback(() => {
+    pinnedRef.current = true
+    setShowJump(false)
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [])
+
+  // After every rendered change: restore the anchor after a history prepend
+  // (the viewport stays where the reader was), else follow the bottom while
+  // pinned.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (anchorRef.current != null) {
+      el.scrollTop = el.scrollHeight - anchorRef.current
+      anchorRef.current = null
+    } else if (pinnedRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [state])
+
   const filterId = spaceMode && props.conversationId != null ? props.conversationId : null
   const shown = filterId != null ? state.entries.filter((e) => e.convId === filterId) : state.entries
 
   return (
     <section
+      ref={scrollRef}
+      onScroll={onScroll}
       data-testid="live-log"
-      className={`max-h-[50vh] overflow-y-auto ${props.className ?? ''}`}
+      className={`relative max-h-[50vh] overflow-y-auto ${props.className ?? ''}`}
     >
       {shown.length === 0 ? (
         <p className="text-sm text-muted-foreground">Waiting for events…</p>
@@ -407,6 +520,16 @@ export default function LiveLog(props: LiveLogProps) {
             </li>
           ))}
         </ol>
+      )}
+      {showJump && (
+        <button
+          type="button"
+          data-testid="jump-to-live"
+          className="sticky bottom-1 ms-auto me-2 block rounded-full border border-border bg-background px-2 py-0.5 font-mono text-xs text-muted-foreground shadow-sm"
+          onClick={jumpToBottom}
+        >
+          ↓ live
+        </button>
       )}
     </section>
   )

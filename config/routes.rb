@@ -21,12 +21,14 @@ module Space
       # Spaces
       get "/spaces/:id",                      to: "spaces.show"
       get "/spaces/:id/stream",               to: "spaces.stream"
+      get "/spaces/:id/stream/history",        to: "spaces.stream_history"
       get "/spaces/:id/artifacts/:artifact_id", to: "spaces.artifact"
 
       # Conversations
       get  "/conversations",            to: "conversations.index"
-      get  "/conversations/:id",        to: "conversations.show"
-      get  "/conversations/:id/stream", to: "conversations.stream"
+      get  "/conversations/:id",                to: "conversations.show"
+      get  "/conversations/:id/stream",         to: "conversations.stream"
+      get  "/conversations/:id/stream/history", to: "conversations.stream_history"
       post "/conversations/ingest",     to: "conversations.ingest"
       patch  "/conversations/:id/publish", to: "conversations.publish"
       delete "/conversations/:id",         to: "conversations.destroy"

@@ -334,4 +334,103 @@ class ConversationsStreamActionTest < Minitest::Test
       Space::Server::Conversations::StreamFanout.stop(conv.id)
     end
   end
+
+  # --- ?tail= message windowing --------------------------------------------------------
+
+  # Seeds `count` messages (message_start + delta) plus a terminal event; the
+  # data JSONs carry the message index so the window boundary is assertable.
+  def seed_messages(redis_client, key, count)
+    count.times do |i|
+      redis_client.xadd(key, "*", "type", "message_start", "data", %({"type":"message_start","seq":#{i}}))
+      redis_client.xadd(key, "*", "type", "text_delta", "data", %({"type":"text_delta","seq":#{i}}))
+    end
+    redis_client.xadd(key, "*", "type", "conversation_complete", "data", '{"type":"conversation_complete"}')
+  end
+
+  def sse_data(chunks)
+    chunks.join.scan(/^data: (.+)$/).map { |(data)| JSON.parse(data) }
+  end
+
+  def test_stream_tail_replays_only_the_last_n_messages
+    sign_in(@owner)
+    conv = Factory[:conversation, user_id: @owner.id, status: 1]
+
+    Sync do
+      redis_client = Async::Redis::Client.new(redis_endpoint)
+      key = Space::Server::Conversations::StreamKey.for(conv.id)
+      redis_client.del(key)
+      seed_messages(redis_client, key, 3)
+
+      _, _, body = get_stream("/conversations/#{conv.id}/stream?tail=2")
+      chunks = collect_sse_chunks(body, timeout: 5)
+
+      seqs = sse_data(chunks).map { |d| d["seq"] }.compact
+      assert_equal [1, 1, 2, 2], seqs, "the last 2 messages only — message 0 is cut"
+      assert chunks.any? { |c| c.include?("conversation_complete") }, "window ends at the stream end (terminal included)"
+    ensure
+      redis_client&.close
+      Space::Server::Conversations::StreamFanout.stop(conv.id)
+    end
+  end
+
+  def test_stream_tail_ignored_on_last_event_id_resume
+    sign_in(@owner)
+    conv = Factory[:conversation, user_id: @owner.id, status: 1]
+
+    Sync do
+      redis_client = Async::Redis::Client.new(redis_endpoint)
+      key = Space::Server::Conversations::StreamKey.for(conv.id)
+      redis_client.del(key)
+      first_entry = redis_client.xadd(key, "*", "type", "message_start", "data", %({"type":"message_start","seq":0}))
+      seed_messages(redis_client, key, 2)
+
+      # Resume from the first entry: everything after the cursor, tail ignored.
+      _, _, body = get_stream("/conversations/#{conv.id}/stream?tail=1",
+                              extra_env: { "HTTP_LAST_EVENT_ID" => first_entry })
+      chunks = collect_sse_chunks(body, timeout: 5)
+
+      seqs = sse_data(chunks).map { |d| d["seq"] }.compact
+      assert_includes seqs, 0, "reconnect replays everything after its cursor — no tail windowing"
+    ensure
+      redis_client&.close
+      Space::Server::Conversations::StreamFanout.stop(conv.id)
+    end
+  end
+
+  def test_stream_tail_windows_the_db_replay_fallback_too
+    sign_in(@owner)
+    conversations_repo = Space::Server::App["repos.conversations_repo"]
+    messages_repo      = Space::Server::App["repos.messages_repo"]
+
+    conv = conversations_repo.create(
+      user_id: @owner.id, status: 2, published: false,
+      created_at: Time.now, updated_at: Time.now
+    )
+    3.times do |i|
+      messages_repo.create(
+        conversation_id: conv.id, role: "user",
+        content: [{ "type" => "text", "text" => "db message #{i}" }],
+        position: i, published: false,
+        created_at: Time.now, updated_at: Time.now
+      )
+    end
+
+    Sync do
+      redis_client = Async::Redis::Client.new(redis_endpoint)
+      key = Space::Server::Conversations::StreamKey.for(conv.id)
+      redis_client.del(key)
+
+      _, _, body = get_stream("/conversations/#{conv.id}/stream?tail=2")
+      chunks = collect_sse_chunks(body, timeout: 5)
+
+      text = chunks.join
+      refute_match "db message 0", text, "db_replay honors the tail window"
+      assert_match "db message 1", text
+      assert_match "db message 2", text
+      assert_match "conversation_complete", text
+    ensure
+      redis_client&.close
+      Space::Server::Conversations::StreamFanout.stop(conv.id)
+    end
+  end
 end

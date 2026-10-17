@@ -48,7 +48,16 @@ The UI leads with spaces: `/` and `/spaces` are the spaces index,
   conversation identity (`conversation_id`/`agent_role`/`agent_name`/`tag`),
   supports `Last-Event-ID` replay, pings a 15s heartbeat, and never ends on
   `conversation_complete` (an ordinary event there — the stream closes only on
-  client disconnect).
+  client disconnect). Both streams accept `?tail=N`: on a fresh connect (no
+  `Last-Event-ID`) the backlog replay is windowed to the last N messages
+  (message-boundary windows — a message's deltas and results stay with it);
+  a `Last-Event-ID` reconnect replays everything after its cursor, tail
+  ignored. Older history pages upward: `GET /conversations/:id/stream/history`
+  and `GET /spaces/:id/stream/history` take `before=<id>` (the oldest held
+  event's SSE id — envelope form for spaces) and `limit=N` (default 100), and
+  return `{"events": [{"id": …, "data": …}, …], "more": bool}` — the same
+  events the stream would emit, chronological, whole-message windowed, with
+  `more` telling the client whether another page remains below.
 
 ## Setup
 

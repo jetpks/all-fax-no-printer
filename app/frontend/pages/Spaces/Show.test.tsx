@@ -106,7 +106,7 @@ describe('Spaces/Show', () => {
   it('mounts the live log on the space stream URL', () => {
     render(<Show {...DEFAULT_PROPS} />)
     expect(MockEventSource.instances).toHaveLength(1)
-    expect(MockEventSource.instances[0].url).toBe('/spaces/1/stream')
+    expect(MockEventSource.instances[0].url).toContain('/spaces/1/stream?tail=')
   })
 
   it('renders top-to-bottom: live log, narrator, conversation rows, iterations', () => {

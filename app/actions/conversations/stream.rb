@@ -9,7 +9,9 @@ module Space
         # heartbeat, and an id-less DB-replay fallback when the Redis display
         # stream has expired and the conversation is terminal (see #db_replay
         # for the fabricated-id aliasing trap). Terminal event type is
-        # "conversation_complete".
+        # "conversation_complete". A fresh connect with `?tail=N` replays only
+        # the last N messages (message-boundary windowed, StreamWindow); a
+        # Last-Event-ID reconnect replays everything after its cursor.
         class Stream < Space::Server::Action
           include Space::Server::Deps["repos.conversations_repo", "repos.messages_repo", "redis"]
 
@@ -34,6 +36,7 @@ module Space
             res.headers["x-accel-buffering"] = "no"
 
             last_event_id = req.get_header("HTTP_LAST_EVENT_ID")
+            tail = last_event_id ? nil : Space::Server::StreamWindow.parse_limit(req.params[:tail])
             fanout = Space::Server::Conversations::StreamFanout.for(conversation.id, redis)
 
             body = proc do |stream|
@@ -44,9 +47,9 @@ module Space
               begin
                 key = Space::Server::Conversations::StreamKey.for(conversation.id)
                 start_id = last_event_id ? "(#{last_event_id}" : "-"
-                entries = redis.xrange(key, start_id, "+")
+                entries = redis.xrange(key, start_id, "+") || []
                 done = false
-                entries&.each do |entry_id, fields|
+                entries[Space::Server::StreamWindow.window_start(entries, tail)..].each do |entry_id, fields|
                   last_id = entry_id
                   stream << sse_format(entry_id, fields)
                   type_idx = fields.index("type")
@@ -58,7 +61,7 @@ module Space
 
                 # DB fallback: Redis stream expired, conversation is terminal (completed or failed)
                 if !done && (conversation.completed? || conversation.failed?)
-                  done = db_replay(stream, conversation.messages)
+                  done = db_replay(stream, tail ? conversation.messages.last(tail) : conversation.messages)
                 end
 
                 unless done

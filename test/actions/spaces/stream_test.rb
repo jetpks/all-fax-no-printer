@@ -335,4 +335,86 @@ class SpacesStreamActionTest < Minitest::Test
       end
     end
   end
+
+  # --- ?tail= message windowing --------------------------------------------------------
+
+  # Seeds `count` messages (message_start + delta) into a conversation's
+  # stream at explicit, caller-chosen milliseconds — cross-conversation ids must
+  # not share a millisecond (per-stream seq counters aren't comparable; the
+  # merged window is only deterministic with distinct ms). The data JSONs carry
+  # the message index so window boundaries are assertable.
+  def seed_space_messages(redis_client, key, ms, count)
+    count.times do |i|
+      redis_client.xadd(key, "#{ms + i}-0", "type", "message_start", "data", %({"type":"message_start","seq":#{i}}))
+      redis_client.xadd(key, "#{ms + i}-1", "type", "text_delta", "data", %({"type":"text_delta","seq":#{i}}))
+    end
+  end
+
+  def test_stream_tail_windows_merged_backlog_to_last_n_messages
+    sign_in(@owner)
+    space  = Factory[:space, user_id: @owner.id]
+    conv_a = Factory[:conversation, user_id: @owner.id, space_id: space.id]
+    conv_b = Factory[:conversation, user_id: @owner.id, space_id: space.id]
+
+    Sync do
+      redis_client = Async::Redis::Client.new(redis_endpoint)
+      key_a = Space::Server::Conversations::StreamKey.for(conv_a.id)
+      key_b = Space::Server::Conversations::StreamKey.for(conv_b.id)
+      [key_a, key_b].each { |k| redis_client.del(k) }
+
+      # Interleaved: conv_a's message first (ms 1000), conv_b's later (ms 2000).
+      seed_space_messages(redis_client, key_a, 1776700000000, 1)
+      seed_space_messages(redis_client, key_b, 1776700001000, 1)
+      redis_client.xadd(key_b, "1776700002000-0", "type", "conversation_complete", "data", '{"type":"conversation_complete"}')
+
+      _, _, body = get_stream("/spaces/#{space.id}/stream?tail=1")
+      chunks = []
+      body_task = stream_body_task(body, chunks)
+
+      wait_until { sse_events(chunks).any? { |_, d| d["type"] == "conversation_complete" } }
+      body_task.stop
+      body_task.wait rescue nil
+
+      events = sse_events(chunks)
+      assert(events.all? { |_, d| d["conversation_id"] == conv_b.id },
+             "the last message is conv_b's — conv_a's is windowed out")
+      assert_equal 3, events.size, "message_start + delta + complete only"
+    ensure
+      redis_client&.close
+      Space::Server::Spaces::StreamMux.stop(space.id)
+    end
+  end
+
+  def test_stream_tail_ignored_on_last_event_id_resume
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id]
+    conv  = Factory[:conversation, user_id: @owner.id, space_id: space.id]
+
+    Sync do
+      redis_client = Async::Redis::Client.new(redis_endpoint)
+      key = Space::Server::Conversations::StreamKey.for(conv.id)
+      redis_client.del(key)
+
+      seed_space_messages(redis_client, key, 1776700000000, 1)
+      first_entry = redis_client.xadd(key, "*", "type", "text_delta", "data", %({"type":"text_delta","conv":#{conv.id},"seq":1}))
+      redis_client.xadd(key, "*", "type", "text_delta", "data", %({"type":"text_delta","conv":#{conv.id},"seq":2}))
+      redis_client.xadd(key, "*", "type", "conversation_complete", "data", '{"type":"conversation_complete"}')
+
+      # Resume from first_entry: tail ignored, everything after the cursor.
+      _, _, body = get_stream("/spaces/#{space.id}/stream?tail=1",
+                              extra_env: { "HTTP_LAST_EVENT_ID" => "#{conv.id}:#{first_entry}" })
+      chunks = []
+      body_task = stream_body_task(body, chunks)
+
+      wait_until { sse_events(chunks).any? { |_, d| d["type"] == "conversation_complete" } }
+      body_task.stop
+      body_task.wait rescue nil
+
+      seqs = sse_events(chunks).map { |_, d| d["seq"] }.compact
+      assert_includes seqs, 2, "reconnect replays everything after its cursor"
+    ensure
+      redis_client&.close
+      Space::Server::Spaces::StreamMux.stop(space.id)
+    end
+  end
 end

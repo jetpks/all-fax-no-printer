@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import LiveLog, { LIVE_LOG_LIMIT, TAG_COLORS } from './LiveLog'
+import LiveLog, { LIVE_LOG_LIMIT, TAG_COLORS, TAIL_MESSAGES, PAGE_MESSAGES } from './LiveLog'
 
 // Same stub pattern as the page tests — a minimal stand-in for the
 // browser EventSource: capture instances, emit(data, lastEventId).
@@ -28,6 +28,9 @@ class MockEventSource {
   }
 }
 
+// A fixed epoch-ms base for synthesized stream ids in pagination tests.
+const BASE_MS = 1700000000000
+
 // HH:MM:SS the way the component derives it: local wall clock from the id's ms.
 function expectedStamp(id: string): string {
   const ms = Number(id.includes(':') ? id.slice(id.indexOf(':') + 1).split('-')[0] : id.split('-')[0])
@@ -46,16 +49,16 @@ describe('LiveLog', () => {
     vi.unstubAllGlobals()
   })
 
-  it('conversation mode opens /conversations/:id/stream', () => {
+  it('conversation mode opens /conversations/:id/stream with a message tail', () => {
     render(<LiveLog conversationId={1} />)
     expect(MockEventSource.instances).toHaveLength(1)
-    expect(MockEventSource.instances[0].url).toBe('/conversations/1/stream')
+    expect(MockEventSource.instances[0].url).toBe(`/conversations/1/stream?tail=${TAIL_MESSAGES}`)
   })
 
-  it('space mode opens /spaces/:id/stream', () => {
+  it('space mode opens /spaces/:id/stream with a message tail', () => {
     render(<LiveLog spaceId={2} />)
     expect(MockEventSource.instances).toHaveLength(1)
-    expect(MockEventSource.instances[0].url).toBe('/spaces/2/stream')
+    expect(MockEventSource.instances[0].url).toBe(`/spaces/2/stream?tail=${TAIL_MESSAGES}`)
   })
 
   it('space mode with conversationId filter renders only that conversation_id events', () => {
@@ -172,5 +175,90 @@ describe('LiveLog', () => {
     const es = MockEventSource.instances[0]
     es.emit({ type: 'conversation_complete' }, '1-9')
     expect(es.closed).toBe(true)
+  })
+
+  // --- upward history pagination -------------------------------------------------------
+
+  // The scrollable element jsdom gives us has scrollHeight/clientHeight 0 — good
+  // enough: the component reads scrollTop only, so tests drive paging by setting
+  // scrollTop and dispatching a scroll event.
+  function scrollToTop(container: HTMLElement) {
+    const el = container.querySelector<HTMLElement>('[data-testid="live-log"]') as HTMLElement
+    el.scrollTop = 0
+    act(() => {
+      el.dispatchEvent(new Event('scroll'))
+    })
+  }
+
+  it('scrolling to the top loads one history page and prepends it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        events: [
+          { id: '1-1', data: { type: 'message_start', role: 'user' } },
+          { id: '1-2', data: { type: 'text_delta', block_id: '0', text: 'old' } },
+        ],
+        more: false,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { container } = render(<LiveLog conversationId={1} />)
+    const es = MockEventSource.instances[0]
+    // The tail window: two frames already held, oldest id 1-5.
+    es.emit({ type: 'tool_result', content: 'older' }, '1-5')
+    es.emit({ type: 'tool_result', content: 'newer' }, '1-6')
+
+    scrollToTop(container)
+    await vi.waitFor(() => {
+      expect(screen.getByText(/older/)).not.toBeNull()
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/conversations/1/stream/history?before=${encodeURIComponent('1-5')}&limit=${PAGE_MESSAGES}`,
+    )
+    // Prepended, not appended: the old page's line renders BEFORE the tail's.
+    const text = screen.getByTestId('live-log').textContent ?? ''
+    expect(text.indexOf('older')).toBeLessThan(text.indexOf('newer'))
+
+    // more: false — a second scroll-to-top must not fetch again.
+    fetchMock.mockClear()
+    scrollToTop(container)
+    await Promise.resolve()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('space-mode history pages carry the envelope conversation_id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        events: [
+          { id: `5:${BASE_MS}-1`, data: { type: 'tool_result', content: 'from-five-old', conversation_id: 5, tag: 'bld' } },
+        ],
+        more: false,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { container } = render(<LiveLog spaceId={2} />)
+    const es = MockEventSource.instances[0]
+    es.emit({ type: 'tool_result', content: 'from-five-live', conversation_id: 5, tag: 'bld' }, `5:${BASE_MS + 1}-1`)
+
+    scrollToTop(container)
+    await vi.waitFor(() => {
+      expect(screen.getByText(/from-five-old/)).not.toBeNull()
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/spaces/2/stream/history?before=${encodeURIComponent(`5:${BASE_MS + 1}-1`)}&limit=${PAGE_MESSAGES}`,
+    )
+  })
+
+  it('does not page when the oldest frame is id-less (db replay)', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { container } = render(<LiveLog conversationId={1} />)
+    const es = MockEventSource.instances[0]
+    es.emit({ type: 'tool_result', content: 'no ids here' }) // db_replay frame: no id
+
+    scrollToTop(container)
+    await Promise.resolve()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
