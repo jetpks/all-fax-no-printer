@@ -43,7 +43,7 @@ module Space
       # Setting ROUTER_PARSED_BODY here short-circuits _params for these routes
       # only, leaving rack.input untouched for incremental reads/streaming.
       IngestBodyPassthrough = Class.new do
-        RAW_BODY_ROUTES = %r{\A/runs/\d+/ingest\z|\A/spaces/import\z}
+        RAW_BODY_ROUTES = %r{\A/runs/\d+/ingest\z}
 
         def initialize(app) = @app = app
 
@@ -110,7 +110,7 @@ module Space
       config.middleware.use HostRedirect
       config.middleware.use IngestBodyPassthrough
 
-      # JSON request bodies (Jobs::Create's browser/Bearer POST /jobs — I10). Hanami
+      # JSON request bodies. Hanami
       # already auto-appends a form+json Hanami::Middleware::BodyParser at the very end
       # of the stack (Hanami::Config#use_body_parser_middleware, unconditional whenever
       # hanami-router + hanami-controller are bundled — verified in hanami-2.3.2's
@@ -121,8 +121,7 @@ module Space
       # middleware pre-sets ROUTER_PARSED_BODY for /runs/:id/ingest, and BodyParser's
       # own `call` short-circuits whenever that key is already present — so the ingest
       # stream is skipped by construction, not by content-type (application/x-ndjson)
-      # alone. :json only — multipart form-data (Conversations upload) keeps relying on
-      # Hanami's own default registration.
+      # alone.
       config.middleware.use :body_parser, :json
 
       # Dev-only: the Vite dev server (port 3036) serves ES modules cross-origin and injects an

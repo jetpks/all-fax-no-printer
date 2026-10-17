@@ -1,27 +1,24 @@
 # frozen_string_literal: true
 
 require_relative "normalizer/event"
-require_relative "normalizer/claude_code"
-require_relative "normalizer/opencode"
-require_relative "normalizer/claude_session"
 require_relative "normalizer/pi"
 
 module Space
   module Server
     module Normalizer
-      # Detect the producer given a pre-parsed first-line record; returns the parser class.
-      # Pure classification — no I/O, no instantiation.
+      # Detect the producer given a pre-parsed first-line record; returns the parser
+      # class, or nil when no parser claims the stream. Pure classification — no I/O,
+      # no instantiation.
       #
-      # opencode lines have a "part" key and use "sessionID" (uppercase D).
-      # Session-log lines use "sessionId" (camelCase, no underscore).
-      # pi's --mode json first line is {"type":"session",...,"version":N,...} — no
-      # session_id/sessionId/sessionID/part key, so "version" is the clean tell.
-      # Claude Code dispatch lines use "session_id" (snake_case) and have no "part" key.
+      # pi is the only parser this iteration keeps: its --mode json first line is
+      # {"type":"session",...,"version":N,...} — no session_id/sessionId/sessionID/
+      # part key, so "version" is the clean tell. There is no fallback parser: a
+      # non-pi first line leaves select at nil, Runs::Ingest's `Normalizer.select(
+      # record).new` raises, and the ingest rescue path fails the run — the same
+      # visible failure the I05 zero-event rule mandates for unrecognizable streams.
       def self.select(record)
-        return Opencode      if record.key?("part") || record.key?("sessionID")
-        return ClaudeSession if record.key?("sessionId")
-        return Pi            if record["type"] == "session" && record.key?("version")
-        ClaudeCode
+        return Pi if record["type"] == "session" && record.key?("version")
+        nil
       end
     end
   end

@@ -9,7 +9,7 @@ class RunsRepoTest < Minitest::Test
 
   def setup
     Faker::Internet.unique.clear
-    [:artifacts, :iterations, :annotations, :conversation_shares, :messages, :conversations, :jobs, :runs, :spaces, :users].each { |t| conn[t].delete }
+    [:artifacts, :iterations, :messages, :conversations, :runs, :spaces, :users].each { |t| conn[t].delete }
   end
 
   def runs_repo = Space::Server::Repos::RunsRepo.new

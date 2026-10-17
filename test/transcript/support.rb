@@ -7,7 +7,6 @@ $LOAD_PATH.unshift File.expand_path("../../app", __dir__)
 require "minitest/autorun"
 require "transcript/turn"
 require "transcript/round"
-require "transcript/entity"
 
 # Adds test "description" do ... end block syntax to Minitest::Test,
 # matching the style used in the Rails oracle test suite.

@@ -3,7 +3,7 @@
 require_relative "test_helper"
 
 class SchemaTest < Minitest::Test
-  DOMAIN_TABLES = %i[users conversations messages annotations conversation_shares].freeze
+  DOMAIN_TABLES = %i[users conversations messages].freeze
 
   def conn
     @conn ||= Space::Server::App["db.gateway"].connection
@@ -56,30 +56,6 @@ class SchemaTest < Minitest::Test
     c = col(:messages, :occurred_at)
     assert_equal "timestamp with time zone", c[:db_type]
     assert_equal true, c[:allow_null]
-  end
-
-  def test_annotations_selector_jsonb_nullable
-    c = col(:annotations, :selector)
-    assert_equal "jsonb", c[:db_type]
-    assert_equal true,    c[:allow_null]
-  end
-
-  def test_annotations_anchor_message_id_nullable_bigint
-    c = col(:annotations, :anchor_message_id)
-    assert_equal "bigint", c[:db_type]
-    assert_equal true,     c[:allow_null]
-  end
-
-  def test_conversations_source_file_data_text_nullable
-    c = col(:conversations, :source_file_data)
-    assert_equal "text", c[:db_type]
-    assert_equal true,   c[:allow_null]
-  end
-
-  def test_conversation_shares_access_default_view
-    c = col(:conversation_shares, :access)
-    assert_equal false, c[:allow_null]
-    assert_match "view", c[:default].to_s
   end
 
   def test_all_tables_queryable

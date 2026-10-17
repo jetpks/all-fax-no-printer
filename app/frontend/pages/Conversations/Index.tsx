@@ -25,7 +25,6 @@ export default function Index({ conversations, pagination }: Props) {
                 {c.turns_count} turns · {c.status}
                 {c.published && <Badge variant="secondary">published</Badge>}
                 {c.owned && !c.published && <Badge variant="outline">private</Badge>}
-                {c.shared && <Badge variant="outline">shared with you</Badge>}
               </span>
             </li>
           ))}

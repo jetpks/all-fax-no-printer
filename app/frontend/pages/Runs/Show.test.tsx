@@ -70,7 +70,6 @@ const RUN: Run = {
   producer: null,
   created_at: '2026-07-19T14:14:59Z',
   updated_at: '2026-07-19T14:16:32Z',
-  job: null,
 }
 
 describe('Runs/Show', () => {
@@ -98,48 +97,12 @@ describe('Runs/Show', () => {
     expect(screen.queryByText('hello live')).not.toBeNull()
   })
 
-  it('renders run metadata and the owner-only job prompt', () => {
-    const run: Run = {
-      ...RUN,
-      job: { id: 19, status: 'succeeded', prompt: 'Write six aphorisms' },
-    }
-    render(<Show run={run} />)
+  it('renders run metadata', () => {
+    render(<Show run={RUN} />)
 
     expect(screen.queryByText('claude')).not.toBeNull()
     expect(screen.queryByText('qwen3-27b-optiq')).not.toBeNull()
     expect(screen.queryByText('builder')).not.toBeNull()
-    expect(screen.queryByText('#19')).not.toBeNull()
-    expect(screen.queryByText('Write six aphorisms')).not.toBeNull()
-  })
-
-  it('omits the job row and prompt when job is null (non-owner or ingested run)', () => {
-    render(<Show run={RUN} />)
-
-    expect(screen.queryByText('Prompt')).toBeNull()
-    expect(screen.queryByText('Job')).toBeNull()
-  })
-
-  it('renders the prompt as a leading user-styled turn, exactly once', () => {
-    const run: Run = {
-      ...RUN,
-      job: { id: 19, status: 'succeeded', prompt: 'Write six aphorisms' },
-    }
-    const { container } = render(<Show run={run} />)
-
-    const matches = screen.getAllByText('Write six aphorisms')
-    expect(matches).toHaveLength(1)
-
-    const list = container.querySelector('ol')!
-    const firstItem = list.children[0]
-    expect(firstItem.textContent).toContain('Write six aphorisms')
-    expect(firstItem.textContent).toContain('user')
-  })
-
-  it('does not render a leading turn when the job has no prompt', () => {
-    const run: Run = { ...RUN, job: null }
-    const { container } = render(<Show run={run} />)
-    const list = container.querySelector('ol')!
-    expect(list.children).toHaveLength(0)
   })
 
   it('renders a distinct badge for a canceled run, not the failed styling', () => {

@@ -1,13 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Boot-smoke for the supervised web+workers topology.
+# Boot-smoke for the supervised web topology.
 #
-# Asserts the dev jobs queue is quiescent (never enqueues an inference job itself),
-# launches `falcon host falcon.rb`, confirms ALL FOUR services up (web answers /up;
-# executor + consumer workers log ready), enqueues a real Redis import job, observes
-# it drain to :completed, sends SIGTERM, confirms graceful exit 0 and no orphaned
-# child processes.
+# Launches `falcon host falcon.rb`, confirms the web service is up (/answers /up),
+# sends SIGTERM, confirms graceful exit and no orphaned child processes.
 #
 # Usage: cd architect && HANAMI_ENV=development bundle exec ruby bin/topology_smoke.rb
 # Exit 0 = PASS; exit 1 = FAIL (details on stderr)
@@ -15,14 +12,11 @@
 require "timeout"
 require "net/http"
 require "uri"
-require "json"
-require "securerandom"
 
 ARCHITECT_DIR = File.expand_path("..", __dir__)
 WEB_PORT    = 3000
 WEB_URL     = "http://localhost:#{WEB_PORT}/up"
 BOOT_WAIT   = 45  # seconds for falcon host + child processes to boot
-JOB_WAIT    = 60  # seconds for import job to complete
 STOP_WAIT   = 15  # seconds for graceful shutdown
 
 def fail!(msg)
@@ -35,78 +29,8 @@ def log(msg)
   $stdout.flush
 end
 
-# ---------------------------------------------------------------------------
-# Boot Hanami in THIS process so we can create test fixtures and query DB.
-# ---------------------------------------------------------------------------
 ENV["HANAMI_ENV"] ||= "development"
 Dir.chdir(ARCHITECT_DIR)
-require "hanami/boot"
-
-require "async/redis"
-require "async/redis/endpoint"
-require "async/job/processor/redis"
-
-# Verify Redis is reachable
-redis_ep = ENV["REDIS_URL"] ? Async::Redis::Endpoint.parse(ENV["REDIS_URL"]) : Async::Redis.local_endpoint
-require "async"
-Sync do
-  client = Async::Redis::Client.new(redis_ep)
-  client.call("PING")
-  client.close
-end
-log "Redis OK"
-
-# ---------------------------------------------------------------------------
-# The jobs queue must be quiescent: a queued/running job would be claimed by
-# the executor-worker we boot and invoke the real `container` CLI. Fail fast —
-# never clean up other people's data.
-# ---------------------------------------------------------------------------
-busy = Space::Server::Repos::JobsRepo.new.jobs.where(status: %w[queued running]).to_a
-unless busy.empty?
-  fail! "jobs queue not quiescent: #{busy.length} queued/running job(s) in the dev DB " \
-        "(ids: #{busy.map(&:id).join(', ')}) — resolve them before running the smoke"
-end
-log "Jobs queue quiescent — no queued/running jobs"
-
-# ---------------------------------------------------------------------------
-# Create test fixtures: store source file, create conversation record.
-# ---------------------------------------------------------------------------
-FIXTURE = File.join(ARCHITECT_DIR, "test", "fixtures", "files", "transcript.jsonl")
-fail! "fixture missing: #{FIXTURE}" unless File.exist?(FIXTURE)
-
-data = Space::Server::SourceFileUploader.store(File.open(FIXTURE))
-
-users_repo = Space::Server::Repos::UsersRepo.new
-conversations_repo = Space::Server::Repos::ConversationsRepo.new
-
-user = users_repo.create(
-  github_uid:  SecureRandom.uuid,
-  username:    "smoke-#{SecureRandom.hex(4)}",
-  name:        "Smoke Test",
-  email:       "smoke@example.com",
-  avatar_url:  "https://example.com/avatar.png",
-  github_orgs: [],
-  created_at:  Time.now,
-  updated_at:  Time.now
-)
-
-conv = conversations_repo.create(
-  user_id:          user.id,
-  status:           0,
-  published:        false,
-  source_file_data: data,
-  created_at:       Time.now,
-  updated_at:       Time.now
-)
-conv_id = conv.id
-log "Created conversation id=#{conv_id}"
-
-# Enqueue before starting falcon — exercises "job waiting in queue before worker boots" path.
-# Uses the same prefix that falcon.rb's import-worker service will dequeue from.
-enqueue_prefix = "architect-import"
-enqueue_server = Space::Server::Jobs::ImportConversation.build_redis_processor(prefix: enqueue_prefix)
-enqueue_server.call({ "conversation_id" => conv_id })
-log "Enqueued job conversation_id=#{conv_id} prefix=#{enqueue_prefix}"
 
 # ---------------------------------------------------------------------------
 # Launch `falcon host falcon.rb` as a child process (from architect/ dir).
@@ -114,7 +38,6 @@ log "Enqueued job conversation_id=#{conv_id} prefix=#{enqueue_prefix}"
 falcon_bin = `which falcon`.strip
 fail! "falcon not found on PATH" if falcon_bin.empty?
 
-# Capture the host's combined output: the worker ready-line checks below read it.
 require "tmpdir"
 FALCON_LOG = File.join(Dir.mktmpdir("topology-smoke-"), "falcon.log")
 
@@ -160,46 +83,6 @@ until Time.now > deadline
   sleep 0.5
 end
 fail! "Web service did not come up within #{BOOT_WAIT}s (GET #{WEB_URL} never returned 200)" unless web_up
-
-# ---------------------------------------------------------------------------
-# Confirm the executor-worker and consumer-worker children are up: their
-# services log a ready line (the same line the dev bins log) into FALCON_LOG.
-# ---------------------------------------------------------------------------
-WORKER_READY_LINES = ["Executor worker starting", "Consumer worker starting"].freeze
-
-log "Waiting up to #{BOOT_WAIT}s for worker ready lines in falcon log..."
-missing = WORKER_READY_LINES
-deadline = Time.now + BOOT_WAIT
-until Time.now > deadline
-  output = File.read(FALCON_LOG)
-  missing = WORKER_READY_LINES.reject { |line| output.include?(line) }
-  break if missing.empty?
-  sleep 0.5
-end
-unless missing.empty?
-  fail! "worker children not confirmed up within #{BOOT_WAIT}s — missing ready line(s): " \
-        "#{missing.join(' | ')} (see #{FALCON_LOG})"
-end
-log "Executor + consumer workers UP — ready lines observed"
-
-# ---------------------------------------------------------------------------
-# Wait for import job to drain to :completed.
-# ---------------------------------------------------------------------------
-log "Waiting up to #{JOB_WAIT}s for conversation #{conv_id} to reach :completed..."
-job_done = false
-deadline = Time.now + JOB_WAIT
-until Time.now > deadline
-  status = conversations_repo.by_pk(conv_id)&.status
-  if status == :completed
-    log "Conversation #{conv_id} status=:completed"
-    job_done = true
-    break
-  elsif status == :failed
-    fail! "Conversation #{conv_id} status=:failed — import job errored"
-  end
-  sleep 0.5
-end
-fail! "Job did not complete within #{JOB_WAIT}s (status=#{conversations_repo.by_pk(conv_id)&.status})" unless job_done
 
 # Snapshot child PIDs before sending SIGTERM
 children_before = `pgrep -P #{falcon_pid} 2>/dev/null`.split.map(&:to_i)
@@ -250,9 +133,6 @@ log "No orphaned processes — all #{children_before.size} children exited"
 # ---------------------------------------------------------------------------
 puts ""
 puts "TOPOLOGY SMOKE OK"
-puts "  quiescence: no queued/running jobs at start"
 puts "  web: GET #{WEB_URL} → 200"
-puts "  workers: executor + consumer ready lines observed"
-puts "  import: conversation #{conv_id} → :completed"
 puts "  shutdown: graceful exit, 0 orphans"
 exit 0

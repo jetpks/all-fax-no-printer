@@ -24,15 +24,15 @@ require "space/server/runs/stream_key"
 Space::Server::App.start(:redis)
 
 class PersistDbReplayTest < Minitest::Test
-  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "claude_code_stream_tooluse.jsonl"))
-  FIXTURE_EVENT_COUNT = 21  # confirmed: normalizer produces 21 events from the tooluse fixture
+  FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"))
+  FIXTURE_EVENT_COUNT = 23  # confirmed: pi parser produces 23 events from pi_streaming_session.jsonl
   TOKEN = "persist-db-replay-integration-test-deadbeef0123"
 
   def setup
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user  = Factory[:user]
     @run   = Factory[:run, user_id: @user.id, status: 0, published: true]
     @redis = Space::Server::App["redis"]
@@ -74,7 +74,7 @@ class PersistDbReplayTest < Minitest::Test
               assert_equal 202, response.status
               data = JSON.parse(raw)
               assert_equal "complete", data["status"],
-                "ingest must complete (fixture has a result line)"
+                "ingest must complete (pi clean-EOF semantics)"
               assert_equal FIXTURE_EVENT_COUNT, data["events"],
                 "fixture must produce #{FIXTURE_EVENT_COUNT} normalized events"
 
@@ -85,23 +85,25 @@ class PersistDbReplayTest < Minitest::Test
               refute_nil run.conversation_id, "run must have conversation_id after ingest"
 
               msgs = messages_repo.for_conversation(run.conversation_id)
-              assert_equal 3, msgs.size, "tooluse fixture produces 3 DB messages"
-              assert_equal [0, 1, 2], msgs.map(&:position), "positions must be sequential"
+              assert_equal 4, msgs.size, "pi fixture produces 4 DB messages"
+              assert_equal [0, 1, 2, 3], msgs.map(&:position), "positions must be sequential"
 
-              # Correct order after persistor fix: assistant turn first, then tool_result user
-              assert_equal "assistant", msgs[0].role, "position 0 must be assistant (text+tool_use)"
-              assert_equal "user",      msgs[1].role, "position 1 must be user (tool_result)"
-              assert_equal "assistant", msgs[2].role, "position 2 must be second assistant (text)"
+              # pi order: user prompt, assistant turn (tool_use), tool_result user,
+              # second assistant turn.
+              assert_equal "user",      msgs[0].role, "position 0 must be the user prompt"
+              assert_equal "assistant", msgs[1].role, "position 1 must be the assistant (tool_use) turn"
+              assert_equal "user",      msgs[2].role, "position 2 must be the tool_result user message"
+              assert_equal "assistant", msgs[3].role, "position 3 must be the second assistant (text)"
 
-              # Block type coverage — all three types must round-trip through JSONB
+              # Block type coverage — every type must round-trip through JSONB
               assert msgs[0].content.any? { |b| b["type"] == "text" },
-                "assistant msg at pos 0 must have text block"
-              assert msgs[0].content.any? { |b| b["type"] == "tool_use" },
-                "assistant msg at pos 0 must have tool_use block"
-              assert msgs[1].content.any? { |b| b["type"] == "tool_result" },
-                "user msg at pos 1 must have tool_result block"
-              assert msgs[2].content.any? { |b| b["type"] == "text" },
-                "assistant msg at pos 2 must have text block"
+                "user msg at pos 0 must have text block"
+              assert msgs[1].content.any? { |b| b["type"] == "tool_use" },
+                "assistant msg at pos 1 must have tool_use block"
+              assert msgs[2].content.any? { |b| b["type"] == "tool_result" },
+                "user msg at pos 2 must have tool_result block"
+              assert msgs[3].content.any? { |b| b["type"] == "text" },
+                "assistant msg at pos 3 must have text block"
 
               # ── Phase 3: Simulate Redis TTL expiry ────────────────────────────
 
@@ -140,13 +142,13 @@ class PersistDbReplayTest < Minitest::Test
               assert_match "run_complete", sse,
                 "SSE replay must terminate with run_complete " \
                 "(AC-P3: reverting stream.rb lines 53-54 makes this fail)"
-              assert_match "I'll read the README.md file.", sse,
-                "SSE replay must include first assistant text content"
+              assert_match "Let me check the existing test patterns.", sse,
+                "SSE replay must include assistant text content"
               assert_match "tool_use", sse,
                 "SSE replay must include tool_use block events"
               assert_match "tool_result", sse,
                 "SSE replay must include tool_result events"
-              assert_match "space-architect-server", sse,
+              assert_match "Done. I added a smoke test", sse,
                 "SSE replay must include second assistant text content"
 
               # I12: db_replay emits no id: lines — a fabricated id (e.g. the old

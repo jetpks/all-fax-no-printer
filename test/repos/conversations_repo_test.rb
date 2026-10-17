@@ -9,15 +9,15 @@ class ConversationsRepoTest < Minitest::Test
 
   def setup
     Faker::Internet.unique.clear
-    [:artifacts, :iterations, :annotations, :conversation_shares, :messages, :conversations, :jobs, :runs, :spaces, :users].each { |t| conn[t].delete }
+    [:artifacts, :iterations, :messages, :conversations, :runs, :spaces, :users].each { |t| conn[t].delete }
   end
 
   def conversations_repo = Space::Server::Repos::ConversationsRepo.new
   def users_repo = Space::Server::Repos::UsersRepo.new
 
   # Reloaded through UsersRepo so callers get the auto_struct-mapped
-  # Structs::User (with #org_ids) that visible_to's share lookup needs,
-  # rather than the bare struct ROM::Factory hands back.
+  # Structs::User (with #org_ids), rather than the bare struct ROM::Factory
+  # hands back.
   def make_user(overrides = {})
     users_repo.by_pk(Factory[:user, **overrides].id)
   end
@@ -68,8 +68,8 @@ class ConversationsRepoTest < Minitest::Test
     def respond_to_missing?(*) = true
   end
 
-  # I36 discipline must hold under pagination too: visible_to combines :shares
-  # only, never :messages, at any page.
+  # I36 discipline must hold under pagination too: visible_to never combines
+  # :messages, at any page.
   def test_visible_to_issues_no_message_queries_while_paging
     user = make_user
     55.times { |i| Factory[:conversation, user_id: user.id, published: true, updated_at: Time.now - i] }

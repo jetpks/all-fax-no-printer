@@ -24,7 +24,6 @@ const RUN: RunListItem = {
   model: 'sonnet',
   lane: 'builder-a',
   created_at: '2026-06-28T21:32:12.278Z',
-  prompt_snippet: 'do the thing',
 }
 
 const NO_PAGINATION = { page: 1, has_more: false }
@@ -57,17 +56,6 @@ describe('Runs/Index', () => {
     expect(container.textContent).toContain('builder-a')
   })
 
-  it('renders the prompt snippet when present', () => {
-    const { container } = render(<Index runs={[RUN]} pagination={NO_PAGINATION} />)
-    expect(container.textContent).toContain('do the thing')
-  })
-
-  it('omits the prompt snippet when absent (non-owner or no job)', () => {
-    const run = { ...RUN, prompt_snippet: null }
-    const { container } = render(<Index runs={[run]} pagination={NO_PAGINATION} />)
-    expect(container.textContent).not.toContain('do the thing')
-  })
-
   it('renders a distinct badge for a canceled run, not the failed styling', () => {
     const run = { ...RUN, status: 'canceled' as const }
     const { getByText } = render(<Index runs={[run]} pagination={NO_PAGINATION} />)
@@ -85,7 +73,6 @@ describe('Runs/Index', () => {
       model: 'gpt-5',
       lane: 'builder-b',
       created_at: '2026-06-28T22:00:00Z',
-      prompt_snippet: null,
     }
     const { container } = render(<Index runs={[RUN, other]} pagination={NO_PAGINATION} />)
     expect(container.textContent).toContain('opencode')

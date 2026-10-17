@@ -7,7 +7,7 @@ class RunStructTest < Minitest::Test
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
 
     @repo       = Space::Server::App["repos.runs_repo"]
     @users_repo = Space::Server::App["repos.users_repo"]

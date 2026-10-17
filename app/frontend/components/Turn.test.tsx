@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Annotation, Message as MessageType, Round as RoundType, ToolResultIndex } from '@/types'
-import { indexAnnotations } from '@/lib/annotation-index'
 
 vi.mock('@inertiajs/react', () => ({
   useForm: () => ({ data: {}, post: vi.fn(), reset: vi.fn() }),
@@ -25,13 +24,6 @@ vi.mock('@/components/BarMenu', () => ({
   default: ({ label }: { label: string }) => (
     <div data-testid={`bar-menu-${label.replace(/\s+/g, '-').toLowerCase()}`}>{label}</div>
   ),
-}))
-
-vi.mock('@/components/AnnotationSection', () => ({
-  default: ({ annotations }: { annotations: Annotation[] }) =>
-    annotations.length > 0 ? (
-      <div data-testid="annotation-section">{annotations.length} note(s)</div>
-    ) : null,
 }))
 
 import Turn from '@/components/Turn'
@@ -161,25 +153,6 @@ describe('Turn — flat tool rendering inside open round', () => {
     for (const t of tools) {
       expect(container.querySelector(`#tool-${t.id}`)).not.toBeNull()
     }
-  })
-
-  it('existing tool-targeted annotation displays with its inline tool (AC-4d)', () => {
-    const toolNote: Annotation = {
-      id: 1,
-      body: 'test note',
-      author: 'tester',
-      author_avatar_url: null,
-      can_delete: false,
-      target_kind: 'tool',
-      anchor_message_id: 101,
-      tool_use_id: 'tu-101',
-      selector: null,
-    }
-    const annotations = indexAnnotations([toolNote])
-    // A noted tool means its round auto-opens on init (note must be visible on load).
-    // The annotation section is therefore visible without any explicit click.
-    render(<Turn {...BASE_PROPS} rounds={[round]} annotations={annotations} />)
-    expect(screen.getByTestId('annotation-section')).not.toBeNull()
   })
 
   it('round with two tools renders both inline (structure check)', () => {

@@ -7,7 +7,6 @@ module Space
         schema(:users, infer: true) do
           associations do
             has_many :conversations
-            has_many :annotations
           end
         end
       end

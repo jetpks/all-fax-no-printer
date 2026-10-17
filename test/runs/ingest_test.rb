@@ -11,9 +11,8 @@ require "space/server/runs/stream_key"
 
 class IngestTest < Minitest::Test
   REDIS_SKIP_MSG = "Redis unreachable".freeze
-  FIXTURE = File.read(File.join(__dir__, "..", "fixtures", "files", "claude_code_stream_text.jsonl"))
-  MINIMAL_JSONL = "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"/test\",\"session_id\":\"test\",\"tools\":[],\"model\":\"test\"}\n"
-  PI_FIXTURE = File.read(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"))
+  FIXTURE = File.read(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"))
+  MINIMAL_JSONL = "{\"type\":\"session\",\"version\":3,\"id\":\"minimal\",\"cwd\":\"/test\"}\n"
 
   def redis_endpoint
     url = ENV["REDIS_URL"]
@@ -36,7 +35,7 @@ class IngestTest < Minitest::Test
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
+    [:messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user = Factory[:user]
   end
 
@@ -59,7 +58,10 @@ class IngestTest < Minitest::Test
       result = Space::Server::Runs::Ingest.new(redis).call(run, StringIO.new(FIXTURE))
       assert result[:events] > 0, "Expected events > 0, got #{result[:events]}"
       entries = redis.xrange(key, "-", "+")
-      assert_equal result[:events], entries.length, "XRANGE count must match returned event count"
+      # pi never emits run_complete itself; ingest synthesizes the terminal
+      # frame, so the stream carries one more entry than the event count.
+      assert_equal result[:events] + 1, entries.length,
+        "XRANGE count must match event count + the synthetic run_complete"
     end
   end
 
@@ -227,7 +229,7 @@ class IngestTest < Minitest::Test
       io.define_singleton_method(:gets) do
         calls += 1
         raise "simulated read error" if calls > 1
-        "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"/t\",\"session_id\":\"s\",\"tools\":[],\"model\":\"m\"}\n"
+        "{\"type\":\"session\",\"version\":3,\"id\":\"s\",\"cwd\":\"/t\"}\n"
       end
 
       result = Space::Server::Runs::Ingest.new(redis).call(run, io)
@@ -270,25 +272,4 @@ class IngestTest < Minitest::Test
     end
   end
 
-  # --- pi: clean EOF (no run_complete-style sentinel) drives :complete (I17) ---
-
-  def test_pi_stream_reaching_clean_eof_drives_complete_status
-    run = Factory[:run, user_id: @user.id, status: 0]
-    with_redis do |redis|
-      result = Space::Server::Runs::Ingest.new(redis).call(run, StringIO.new(PI_FIXTURE))
-      assert_equal :complete, result[:status]
-    end
-  end
-
-  def test_pi_stream_ends_stream_with_a_synthesized_run_complete_frame
-    run = Factory[:run, user_id: @user.id, status: 0]
-    with_redis do |redis|
-      key = Space::Server::Runs::StreamKey.for(run.id)
-      redis.del(key)
-      Space::Server::Runs::Ingest.new(redis).call(run, StringIO.new(PI_FIXTURE))
-      entries = redis.xrange(key, "-", "+")
-      assert_equal "run_complete", entries.last[1][1]
-      assert_equal 1, entries.count { |e| e[1][1] == "run_complete" }
-    end
-  end
 end

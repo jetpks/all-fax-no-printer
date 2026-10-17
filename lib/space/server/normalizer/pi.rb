@@ -33,7 +33,7 @@ module Space
         # Duck-typed by Runs::Ingest: pi's stream has no completion sentinel, so
         # reaching clean EOF (no read error) after this parser was ever used is
         # itself the completion signal — the real success/failure arbiter is the
-        # harness exit code, checked downstream in Jobs::Consumer.
+        # harness exit code, checked by the run's owner after ingest.
         def complete_at_eof? = true
 
         private

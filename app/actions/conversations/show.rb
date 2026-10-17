@@ -23,14 +23,6 @@ module Space
 
             owner = conversation.owned_by?(user)
             visible = conversation.visible_messages(user)
-            visible_ids = visible.map(&:id).to_set
-
-            # PHASE-0 BLOCKER: Annotation struct lacks targets_conversation? (read-only struct).
-            # Inline check `target_kind == "conversation"` is the functional equivalent of the
-            # oracle's enum predicate. See lane report D1.
-            annotations = conversation.annotations.select do |a|
-              a.target_kind == "conversation" || visible_ids.include?(a.anchor_message_id)
-            end
 
             turns = Space::Server::Transcript::Turn.group(visible)
 
@@ -40,9 +32,7 @@ module Space
 
             render_inertia(req, res, "Conversations/Show", props: {
               conversation: Serializers::Conversation.conversation_json(conversation, viewer: user, owner: owner, **links),
-              turns: turns.map { |t| Serializers::Conversation.turn_json(t, owner: owner) },
-              annotations: annotations.map { |a| Serializers::Conversation.annotation_json(a, viewer: user) },
-              shares: owner ? conversation.shares.map { |s| Serializers::Conversation.share_json(s) } : nil
+              turns: turns.map { |t| Serializers::Conversation.turn_json(t, owner: owner) }
             })
           end
         end

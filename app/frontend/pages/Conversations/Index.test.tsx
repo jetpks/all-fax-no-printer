@@ -23,7 +23,6 @@ const CONVERSATION: ConversationListItem = {
   published: false,
   turns_count: 3,
   owned: true,
-  shared: false,
 }
 
 const NO_PAGINATION = { page: 1, has_more: false }
