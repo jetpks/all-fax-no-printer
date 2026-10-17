@@ -198,6 +198,14 @@ export type SpaceConversation = {
   updated_at: string
 }
 
+// The last qualifying narrator message for a space (server-derived; the show
+// action adds this prop). null → no narrator conversation or no qualifying text.
+export type SpaceNarrator = {
+  conversation_id: number
+  text: string
+  updated_at: string
+}
+
 export type SpaceArtifact = {
   id: number
   kind: string

@@ -21,10 +21,11 @@ The UI leads with spaces: `/` and `/spaces` are the spaces index,
 `/conversations` lists captured sessions across spaces.
 
 - **Spaces** — architect-loop space directories (iterations, artifacts,
-  decisions) browsable at `/spaces/:id`; a space's show page interleaves its
-  iterations with its captured conversations on one timeline. Conversations
-  not filed into a space are grouped by working directory under the index's
-  "Unspaced" section.
+  decisions) browsable at `/spaces/:id`; the show page is the phone observation
+  deck: a bounded-height live log of the whole space on top, the last narrator
+  message beneath it, newest-first conversations with full-row tap targets, and
+  iterations in their own section below. Conversations not filed into a space
+  are grouped by working directory under the index's "Unspaced" section.
 - **Conversations** — every captured agent session lands as a conversation
   (index at `/conversations`, show at `/conversations/:id`, publish toggle,
   delete). A capture still landing mounts a live view on its show page while
