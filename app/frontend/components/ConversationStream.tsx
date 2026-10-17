@@ -6,10 +6,7 @@ import type { LiveMessage, SSEEvent, SSEState } from '@/lib/sse-reducer'
 import type { Message as MessageType } from '@/types'
 
 type Props = {
-  runId: number
-  // The opening prompt, rendered as a leading user-styled turn — see the
-  // comment above promptMessage below for why it never arrives over SSE.
-  prompt?: string | null
+  conversationId: number
   onStatusChange?: (status: SSEState['status']) => void
 }
 
@@ -27,7 +24,7 @@ function toLegacyMessage(msg: LiveMessage, index: number): MessageType {
   }
 }
 
-export default function RunStream({ runId, prompt, onStatusChange }: Props) {
+export default function ConversationStream({ conversationId, onStatusChange }: Props) {
   const [state, setState] = useState(initialState)
 
   // Tracks the live SSE connection across reconnects (mount + refocus) so a
@@ -41,18 +38,19 @@ export default function RunStream({ runId, prompt, onStatusChange }: Props) {
 
   const connect = useCallback(() => {
     esRef.current?.close()
-    // Fresh run state: a reconnect replays the run from the top (Redis backlog
-    // or db_replay), so stale accumulated messages must not linger underneath it.
+    // Fresh stream state: a reconnect replays the capture from the top (Redis
+    // backlog or db_replay), so stale accumulated messages must not linger
+    // underneath it.
     setState(initialState)
 
     let done = false
-    const es = new EventSource(`/runs/${runId}/stream`)
+    const es = new EventSource(`/conversations/${conversationId}/stream`)
 
     es.onmessage = (e: MessageEvent) => {
       try {
         const event = JSON.parse(e.data as string) as SSEEvent
         setState((prev) => reduce(prev, event, e.lastEventId || undefined))
-        if (event.type === 'run_complete' && !done) {
+        if (event.type === 'conversation_complete' && !done) {
           done = true
           es.close()
         }
@@ -61,13 +59,14 @@ export default function RunStream({ runId, prompt, onStatusChange }: Props) {
       }
     }
 
-    // Allow auto-reconnect on transient errors; only force-close once run_complete seen.
+    // Allow auto-reconnect on transient errors; only force-close once
+    // conversation_complete seen.
     es.onerror = () => {
       if (done) es.close()
     }
 
     esRef.current = es
-  }, [runId])
+  }, [conversationId])
 
   useEffect(() => {
     connect()
@@ -76,7 +75,7 @@ export default function RunStream({ runId, prompt, onStatusChange }: Props) {
 
   // A backgrounded tab's EventSource can die silently, leaving stale painted
   // "live" state with no subscription and no recovery short of a manual
-  // reload. On refocus, re-sync automatically — unless the run already
+  // reload. On refocus, re-sync automatically — unless the capture already
   // finished, in which case there's nothing left to stream.
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -99,22 +98,6 @@ export default function RunStream({ runId, prompt, onStatusChange }: Props) {
 
   const toolResults = useMemo(() => buildToolResultIndex(legacyMessages), [legacyMessages])
 
-  // The opening prompt never streams over SSE (claude/opencode don't emit it,
-  // and pi's copy — now that it's persisted, see Normalizer::Pi — arrives via
-  // the replayed transcript, not this live view). It only reaches the client
-  // through job.spec["prompt"], owner-gated the same way as job.id/status.
-  const promptMessage: MessageType | null = prompt
-    ? {
-        id: -1,
-        role: 'user',
-        model: null,
-        position: -1,
-        published: false,
-        blocks: [{ type: 'text', text: prompt }],
-        can_publish: false,
-      }
-    : null
-
   return (
     <>
       {state.status === 'pending' && (
@@ -122,11 +105,6 @@ export default function RunStream({ runId, prompt, onStatusChange }: Props) {
       )}
 
       <ol className="mt-4 space-y-3">
-        {promptMessage && (
-          <li>
-            <Message message={promptMessage} conversationId={0} hideMenu />
-          </li>
-        )}
         {legacyMessages.map((msg, i) => (
           <li key={i}>
             <Message message={msg} conversationId={0} toolResults={toolResults} hideMenu />

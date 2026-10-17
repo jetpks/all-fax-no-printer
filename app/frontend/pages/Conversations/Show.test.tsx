@@ -23,12 +23,20 @@ vi.mock('@/layouts/AppLayout', () => ({
   default: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }))
 
+// Isolate the live view; the stream component's own behavior is covered by
+// ConversationStream.test.tsx.
+vi.mock('@/components/ConversationStream', () => ({
+  default: ({ conversationId }: { conversationId: number }) => (
+    <div data-testid="conversation-stream">stream-{conversationId}</div>
+  ),
+}))
+
 import Show from './Show'
 
 const CONVERSATION: Conversation = {
   id: 5,
   title: 'Fix the frobnicator',
-  status: 'complete',
+  status: 'completed',
   published: false,
   source: null,
   original_cwd: null,
@@ -36,6 +44,10 @@ const CONVERSATION: Conversation = {
   agent_version: null,
   can_manage: false,
   owner: { username: 'eric', name: null, avatar_url: null },
+  agent_role: null,
+  agent_name: null,
+  model: null,
+  space_id: null,
 }
 
 function renderShow(conversation: Conversation) {
@@ -56,8 +68,8 @@ describe('Conversations/Show', () => {
     const conversation = {
       ...CONVERSATION,
       children: [
-        { id: 6, title: 'Subagent one', session_id: 'sess-a' },
-        { id: 7, title: 'Subagent two', session_id: 'sess-b' },
+        { id: 6, title: 'Subagent one', session_id: 'sess-a', agent_role: null },
+        { id: 7, title: 'Subagent two', session_id: 'sess-b', agent_role: null },
       ],
     }
     renderShow(conversation)
@@ -83,5 +95,48 @@ describe('Conversations/Show', () => {
 
     expect(screen.queryByText('Subagent transcripts')).toBeNull()
     expect(screen.queryByText(/^part of/)).toBeNull()
+  })
+
+  it('shows the agent_role badge on each child that carries one', () => {
+    const conversation = {
+      ...CONVERSATION,
+      children: [
+        { id: 6, title: 'Subagent one', session_id: 'sess-a', agent_role: 'judge' },
+        { id: 7, title: 'Subagent two', session_id: 'sess-b', agent_role: null },
+      ],
+    }
+    renderShow(conversation)
+
+    expect(screen.getByText('judge')).not.toBeNull()
+  })
+})
+
+describe('Conversations/Show — live capture mount', () => {
+  it('mounts the live stream when the capture is pending', () => {
+    renderShow({ ...CONVERSATION, status: 'pending' })
+
+    expect(screen.getByTestId('live-capture')).not.toBeNull()
+    expect(screen.getByTestId('conversation-stream')).not.toBeNull()
+  })
+
+  it('mounts the live stream when the capture is live', () => {
+    renderShow({ ...CONVERSATION, status: 'live' })
+
+    expect(screen.getByTestId('live-capture')).not.toBeNull()
+    expect(screen.getByTestId('conversation-stream')).not.toBeNull()
+  })
+
+  it('does not mount the stream once the capture is terminal', () => {
+    for (const status of ['completed', 'failed']) {
+      const { container } = renderShow({ ...CONVERSATION, status })
+      expect(container.querySelector('[data-testid="live-capture"]')).toBeNull()
+      expect(container.querySelector('[data-testid="conversation-stream"]')).toBeNull()
+    }
+  })
+
+  it('streams the mounted conversation by its id', () => {
+    renderShow({ ...CONVERSATION, status: 'live' })
+
+    expect(screen.getByTestId('conversation-stream').textContent).toBe('stream-5')
   })
 })

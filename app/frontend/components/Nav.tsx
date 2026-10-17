@@ -27,13 +27,16 @@ export default function Nav() {
 
         <nav className="flex items-center gap-3">
           <Button asChild variant="ghost" size="sm">
-            <Link href="/runs">Runs</Link>
+            <Link href="/spaces">Spaces</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/conversations">Conversations</Link>
           </Button>
 
           {current_user ? (
             <>
               <Button asChild variant="ghost" size="sm">
-                <Link href="/api_tokens">API Keys</Link>
+                <Link href="/api_tokens">Api Tokens</Link>
               </Button>
 
               <DropdownMenu>

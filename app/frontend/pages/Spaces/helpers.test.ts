@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Space, SpaceArtifact, SpaceIteration, SpaceListItem, SpaceRun } from '@/types'
+import type { Space, SpaceArtifact, SpaceConversation, SpaceIteration, SpaceListItem } from '@/types'
 import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, formatAbsolute, relativeTime, timeLabel } from './helpers'
 
 // Fixtures matching the locked props contract exactly.
@@ -10,8 +10,8 @@ const SPACE_LIST_FIXTURE: SpaceListItem = {
   title: 'Space Server Objects',
   status: 'active',
   iterations_count: 3,
-  runs_count: 5,
-  imported_at: '2026-06-27T00:00:00Z',
+  conversations_count: 5,
+  last_activity_at: '2026-06-27T00:00:00Z',
 }
 
 const SPACE_FIXTURE: Space = {
@@ -22,12 +22,14 @@ const SPACE_FIXTURE: Space = {
   repos: ['github.com/jetpks/space-architect'],
 }
 
-const RUN_FIXTURE: SpaceRun = {
+const CONVERSATION_FIXTURE: SpaceConversation = {
   id: 3,
-  lane: 'lane-a',
-  role: 'builder',
-  status: 'complete',
-  conversation_id: 42,
+  title: 'Build the observation deck',
+  agent_role: 'builder',
+  agent_name: 'Deck Builder',
+  status: 'completed',
+  model: 'claude',
+  updated_at: '2026-06-27T00:00:00Z',
 }
 
 const ARTIFACT_FIXTURE: SpaceArtifact = {
@@ -44,7 +46,6 @@ const ITERATION_FIXTURE: SpaceIteration = {
   freeze_sha: 'abc1234',
   verdict: 'continue',
   artifacts: [ARTIFACT_FIXTURE],
-  runs: [RUN_FIXTURE],
 }
 
 const OTHER_ARTIFACT_FIXTURE: SpaceArtifact = {
@@ -81,7 +82,7 @@ describe('relativeTime', () => {
 // --- badge variant maps ---
 
 describe('STATUS_VARIANT', () => {
-  it('maps complete → secondary', () => expect(STATUS_VARIANT['complete']).toBe('secondary'))
+  it('maps completed → secondary', () => expect(STATUS_VARIANT['completed']).toBe('secondary'))
   it('maps pending → outline', () => expect(STATUS_VARIANT['pending']).toBe('outline'))
   it('maps live → default', () => expect(STATUS_VARIANT['live']).toBe('default'))
   it('maps failed → destructive', () => expect(STATUS_VARIANT['failed']).toBe('destructive'))
@@ -109,14 +110,18 @@ describe('Spaces/Index — props contract shape', () => {
     expect(SPACE_LIST_FIXTURE.slug).toBe('20260627-space-server-objects')
   })
 
-  it('space list item exposes iteration and run counts', () => {
+  it('space list item exposes iteration and conversation counts', () => {
     expect(SPACE_LIST_FIXTURE.iterations_count).toBe(3)
-    expect(SPACE_LIST_FIXTURE.runs_count).toBe(5)
+    expect(SPACE_LIST_FIXTURE.conversations_count).toBe(5)
   })
 
-  it('imported_at produces a valid relative time string', () => {
-    expect(typeof relativeTime(SPACE_LIST_FIXTURE.imported_at)).toBe('string')
-    expect(relativeTime(SPACE_LIST_FIXTURE.imported_at).length).toBeGreaterThan(0)
+  it('last_activity_at produces a valid relative time string', () => {
+    expect(typeof relativeTime(SPACE_LIST_FIXTURE.last_activity_at!)).toBe('string')
+    expect(relativeTime(SPACE_LIST_FIXTURE.last_activity_at!).length).toBeGreaterThan(0)
+  })
+
+  it('last_activity_at may be null (nil-safe)', () => {
+    expect({ ...SPACE_LIST_FIXTURE, last_activity_at: null }.last_activity_at).toBeNull()
   })
 
   it('link href resolves to /spaces/:id', () => {
@@ -164,18 +169,18 @@ describe('Spaces/Show — iteration fields', () => {
   })
 })
 
-describe('Spaces/Show — run links', () => {
-  it('run link href resolves to /runs/:id', () => {
-    expect(`/runs/${RUN_FIXTURE.id}`).toBe('/runs/3')
+describe('Spaces/Show — conversation links', () => {
+  it('conversation link href resolves to /conversations/:id', () => {
+    expect(`/conversations/${CONVERSATION_FIXTURE.id}`).toBe('/conversations/3')
   })
 
-  it('run status maps to a badge variant', () => {
-    expect(STATUS_VARIANT[RUN_FIXTURE.status] ?? 'outline').toBe('secondary')
+  it('conversation status maps to a badge variant', () => {
+    expect(STATUS_VARIANT[CONVERSATION_FIXTURE.status] ?? 'outline').toBe('secondary')
   })
 
-  it('run exposes lane and role', () => {
-    expect(RUN_FIXTURE.lane).toBe('lane-a')
-    expect(RUN_FIXTURE.role).toBe('builder')
+  it('conversation exposes its role tag and model', () => {
+    expect(CONVERSATION_FIXTURE.agent_role).toBe('builder')
+    expect(CONVERSATION_FIXTURE.model).toBe('claude')
   })
 })
 

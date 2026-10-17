@@ -28,7 +28,7 @@ export type SSEState = {
   // Blocks being assembled between block_open and block_close.
   openBlocks: Record<string, OpenBlock>
   // tool_result events between assistant messages; flushed as a user message
-  // on the next message_start or run_complete.
+  // on the next message_start or conversation_complete.
   pendingUserBlocks: ToolResultBlock[]
   status: 'pending' | 'live' | 'complete'
   // Last SSE `id:` frame field applied — used for reconnect dedup and gap detection.
@@ -62,7 +62,7 @@ export function reduce(state: SSEState, event: SSEEvent, sseId?: string): SSESta
 
 function applyEvent(state: SSEState, event: SSEEvent): SSEState {
   switch (event.type) {
-    case 'run_init':
+    case 'session_init':
       return { ...state, status: 'live' }
 
     case 'message_start': {
@@ -144,7 +144,7 @@ function applyEvent(state: SSEState, event: SSEEvent): SSEState {
       return { ...state, pendingUserBlocks: [...state.pendingUserBlocks, block] }
     }
 
-    case 'run_complete':
+    case 'conversation_complete':
       return { ...flushPending(state), status: 'complete' }
 
     default:

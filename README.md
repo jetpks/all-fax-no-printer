@@ -1,7 +1,7 @@
 # all-fax-no-printer
 
-A Ruby/Hanami application for exploring and sharing AI agent runs. Watch a
-streaming trace land live over SSE, browse the persisted transcript with rich
+A Ruby/Hanami application for exploring and sharing AI agent sessions. Watch a
+captured session land live over SSE, browse the persisted transcript with rich
 markdown and code rendering, and publish conversations read-only.
 
 ## Lineage
@@ -17,21 +17,28 @@ changed.
 
 ## Feature areas
 
-- **Runs** — streaming trace ingest over SSE (`POST /runs` + `POST
-  /runs/:id/ingest` push traces, `/runs/:id/stream` renders them live).
-  Ingest answers `202` with `{id, status, events}` — plus `error` when the
-  stream failed — and a body that parses but yields no recognizable events
-  fails the run visibly instead of leaving it `live` forever. The pi harness
-  stream is the one parser (`lib/space/server/normalizer/pi.rb`); a stream
-  pi's first-line classification doesn't claim fails the run (there is no
-  fallback parser).
-- **Conversations** — ingested runs persist incrementally as browsable
-  conversations (index, show, publish toggle, delete). Publishing follows
-  the published/owned semantics: owners and viewers of a published
-  conversation see the whole transcript; everyone else sees only
-  individually-published messages.
-- **Spaces** — importing architect-loop space directories (iterations,
-  artifacts, transcripts) for browsing.
+The UI leads with spaces: `/` and `/spaces` are the spaces index,
+`/conversations` lists captured sessions across spaces.
+
+- **Spaces** — architect-loop space directories (iterations, artifacts,
+  decisions) browsable at `/spaces/:id`; a space's show page interleaves its
+  iterations with its captured conversations on one timeline. Conversations
+  not filed into a space are grouped by working directory under the index's
+  "Unspaced" section.
+- **Conversations** — every captured agent session lands as a conversation
+  (index at `/conversations`, show at `/conversations/:id`, publish toggle,
+  delete). A capture still landing mounts a live view on its show page while
+  its status is `pending` or `live`. The parser is the pi harness stream
+  (`lib/space/server/normalizer/pi.rb`); a body that parses but yields no
+  recognizable events fails the conversation visibly instead of leaving it
+  `live` forever (pi's first-line classification doesn't claim fails the
+  conversation — there is no fallback parser).
+- **Live streaming (SSE)** — `GET /conversations/:id/stream` replays the
+  Redis backlog honoring the client's `Last-Event-ID` header, then fans out
+  live with a 15s heartbeat. Event vocabulary: `session_init` (the capture is
+  live), `message_start`, `block_open`, `text_delta`, `tool_args_delta`,
+  `block_close`, `message_complete`, `tool_result`, and the terminal
+  `conversation_complete` (the client closes the stream on it).
 
 ## Setup
 
@@ -60,37 +67,64 @@ npm test               # Vitest (TypeScript/component tests)
 npm run check          # TypeScript type check
 ```
 
-## Ingest Token Auth
+## Ingest mouth
 
-Machine pushes (e.g. from the CLI dispatch harness) authenticate with a bearer
-token. Per-user API tokens are the primary path; the shared `INGEST_TOKEN`
-remains as legacy back-compat.
+`POST /conversations/ingest` accepts a `pi --mode json` JSONL body and lands
+it as a conversation. The first line of a session's first POST must be the
+`{"type":"session",...}` record; it may reappear in later chunks —
+re-processing it is a metadata no-op.
+
+Machine pushes authenticate with `Authorization: Bearer <token>`: per-user
+`sat_` tokens are the primary path; the shared `INGEST_TOKEN` remains as
+legacy back-compat. No bearer → `401`.
+
+### Optional headers (applied idempotently per POST)
+
+| Header                     | Effect                                                                                             |
+|----------------------------|----------------------------------------------------------------------------------------------------|
+| `X-Space-Slug`             | Find-or-create the authenticated user's space and file the conversation under it; absent → the conversation is grouped by working directory instead |
+| `X-Parent-Session-Id`      | Marks the conversation as a subagent transcript of the session with that id                          |
+| `X-Agent-Role`             | Role tag (architect/builder/judge/narrator/coordinator/…); absent = interactive                       |
+| `X-Agent-Name`             | Agent display name                                                                                   |
+| `X-Session-Complete: true` | Terminal: the conversation's status becomes `completed` and a terminal `conversation_complete` SSE event is emitted; absent → status `live` |
+
+### Idempotency
+
+The pi session record's `id` is the conversation key — find-or-create by
+`(user_id, session_id)`. Each applied pi record's `id` is tracked on the
+conversation, and an already-applied record is skipped entirely: no message
+write and no Redis event, so whole-file re-sends, chunk retries, and
+reconnect replays land zero duplicates.
+
+The response is `202` JSON `{id, session_id, status, events}` (plus `error`
+when the body parses but yields no recognizable events — a visible failure,
+never silent live-forever).
 
 ### Per-user API tokens (primary)
 
-Each user mints named tokens at **API tokens** (`/api_tokens` — session sign-in
-required; bearer is for the data API, not this page). Minting takes only a
-name: the server generates the secret (`sat_` + 64 hex chars, from
+Each user mints named tokens at **Api Tokens** (`/api_tokens` — session
+sign-in required; bearer is for the data API, not this page). Minting takes
+only a name: the server generates the secret (`sat_` + 64 hex chars, from
 `SecureRandom.hex(32)`), shows it **exactly once** in the mint response, and
-persists only its SHA-256 hex digest in `api_tokens.token_hash` (unique index).
-The plaintext is never stored and cannot be recovered — the mint view shows it
-exactly once, with a copy-to-clipboard affordance, so store it then.
+persists only its SHA-256 hex digest in `api_tokens.token_hash` (unique
+index). The plaintext is never stored and cannot be recovered — the mint view
+shows it exactly once, with a copy-to-clipboard affordance, so store it then.
 Revocation is soft (`revoked_at` stamp), so mint history stays auditable.
 
 Requests carrying `Authorization: Bearer <token>` authenticate **as the
-token's owner** on the bearer endpoints (`POST /runs`, `POST
-/runs/:id/ingest`); ownership and visibility then flow per-user with no
-further configuration. Lookup is a unique-index hit on the presented token's
-SHA-256 digest — never a linear scan or plaintext comparison. Every use
-touches `last_used_at` on the token row. Failed bearer attempts warn-log
-request path and outcome only — never token material.
+token's owner** on the bearer endpoint (`POST /conversations/ingest`);
+ownership and visibility then flow per-user with no further configuration.
+Lookup is a unique-index hit on the presented token's SHA-256 digest — never
+a linear scan or plaintext comparison. Every use touches `last_used_at` on
+the token row. Failed bearer attempts warn-log request path and outcome only
+— never token material.
 
 ### Legacy global INGEST_TOKEN (back-compat)
 
 | Env var             | Description                                      |
 |---------------------|--------------------------------------------------|
-| `INGEST_TOKEN`      | Secret bearer token for `POST /runs` and `POST /runs/:id/ingest` |
-| `INGEST_USER_ID`    | Integer user ID that ingested runs are owned by (plain config, not a secret) |
+| `INGEST_TOKEN`      | Secret bearer token for `POST /conversations/ingest` |
+| `INGEST_USER_ID`    | Integer user ID that ingested conversations are owned by (plain config, not a secret) |
 
 When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are
 authenticated as the configured user and bypass CSRF (machine pushes carry no
@@ -101,17 +135,17 @@ one.
 
 ## Deploy
 
-Production runs on `studio.slush.systems` via the `deploy/ansible` role — see
-[docs/how-to/deploy-on-the-studio.md](docs/how-to/deploy-on-the-studio.md).
+Production serves from `studio.slush.systems` via the `deploy/ansible` role —
+see [docs/how-to/deploy-on-the-studio.md](docs/how-to/deploy-on-the-studio.md).
 
 ## Retention & Cleanup (v1: manual)
 
-**Redis run streams.** The `run:<id>` display stream self-evicts: every
-`XADD` refreshes the key's TTL to `StreamKey::TTL_SECONDS` (1800s / 30
-minutes), so a stream with no further writes simply expires. No operator
-action needed.
+**Redis conversation streams.** The `conversation:<id>` display stream
+self-evicts: every `XADD` refreshes the key's TTL to `StreamKey::TTL_SECONDS`
+(1800s / 30 minutes), so a stream with no further writes simply expires. No
+operator action needed.
 
-**Postgres growth.** `runs`, `conversations`, and `messages` rows are never
-deleted by the app — there is no rake task, cron, or GC job. If a table needs
-pruning, that's a manual `DELETE` an operator runs directly; no tooling ships
-for it in v1.
+**Postgres growth.** `conversations` and `messages` rows are never deleted by
+the app — there is no rake task, cron, or GC job. If a table needs pruning,
+that's a manual `DELETE` an operator issues directly; no tooling ships for it
+in v1.
