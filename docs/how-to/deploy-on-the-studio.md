@@ -13,8 +13,6 @@ for the full role reference; this doc is the apply runbook.
    playbook verifies `op` is reachable; it never creates or reads this file.
 2. **1Password items.** Create these under the `ansible` vault,
    `space-architect-server` item, before the first apply:
-   - `ingest-token` — the `INGEST_TOKEN` bearer secret (`bin/serve` resolves
-     it fresh on every boot; see `README.md`).
    - `session-secret` — `SESSION_SECRET` for Hanami's cookie sessions
      (`run-server.sh` resolves it fresh on every boot).
 3. **Datastores (brew-owner-provisioned).** PostgreSQL 18.4 and Redis are
@@ -59,17 +57,16 @@ one-time setup).
   ordered before the topology so the executor-worker's sandbox runs work on
   first request.
 - `com.slushsystems.space-architect-server` — `run-server.sh` resolves
-  `SESSION_SECRET` (op) and `INGEST_USER_ID` (looked up by the seeded ingest
-  user's `github_uid`, never hardcoded), then execs `bin/serve`, which
-  resolves `INGEST_TOKEN` (op) and execs `falcon host falcon.rb`
+  `SESSION_SECRET` (op), then execs `bin/serve`, which execs
+  `falcon host falcon.rb`
   (web + import + executor + consumer, one process, KeepAlive).
 
 Verify: `curl localhost:3000/up` → 200.
 
 ## Restart / reboot behavior
 
-Falcon killed → launchd (`KeepAlive`) restarts it → `run-server.sh` and
-`bin/serve` re-resolve every secret from op, so cold-restarting falcon never
-strands ingest auth on a hand-minted token. After a host reboot,
+Falcon killed → launchd (`KeepAlive`) restarts it → `run-server.sh`
+re-resolves every secret from op. (Ingest auth is per-user `sat_` tokens, so
+it never depends on boot-time env resolution.) After a host reboot,
 `RunAtLoad` brings the container-system agent and the topology agent back
 in order, same as any other `com.slushsystems.*` agent on this host.

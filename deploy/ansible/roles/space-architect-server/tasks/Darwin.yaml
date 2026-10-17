@@ -93,9 +93,11 @@
     PATH: "{{ mise_node_bin }}:/opt/homebrew/bin:/usr/bin:/bin"
   changed_when: true
 
-# ── 8. Database schema + ingest-owner-user seed (BRIEF §7.6, §4.2) ──────────
+# ── 8. Database schema (BRIEF §7.6, §4.2) ───────────────────────────────────
 # `hanami db prepare`: creates the db + loads structure.sql if missing, runs
-# pending migrations, then always runs config/db/seeds.rb (hanami-cli DB::Prepare).
+# pending migrations, then always runs config/db/seeds.rb (a no-op since the
+# ingest-owner seed was removed with the shared global-token fallback —
+# hanami-cli DB::Prepare).
 
 - name: space-architect-server | hanami db prepare (production)
   ansible.builtin.command: "{{ mise_ruby_bin }}/bundle exec hanami db prepare"
