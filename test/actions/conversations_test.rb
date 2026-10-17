@@ -172,13 +172,16 @@ class ConversationsActionTest < Minitest::Test
     sign_in(@owner)
     parent = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-parent"]
     conv = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-child", parent_session_id: "sess-parent"]
-    child = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-grandchild", parent_session_id: "sess-child"]
+    child = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-grandchild", parent_session_id: "sess-child", agent_role: "builder"]
 
     _, _, body = inertia_get("/conversations/#{conv.id}")
     data = parse_json(body)
     assert_equal parent.id, data["props"]["conversation"]["parent"]["id"]
     assert_equal [child.id], data["props"]["conversation"]["children"].map { |c| c["id"] }
     assert_equal "sess-grandchild", data["props"]["conversation"]["children"].first["session_id"]
+    # The frozen seam's children json: {id, title, session_id, agent_role} —
+    # the deck lane's Show page badges children by agent_role.
+    assert_equal "builder", data["props"]["conversation"]["children"].first["agent_role"]
   end
 
   def test_show_omits_parent_and_children_keys_for_non_owner

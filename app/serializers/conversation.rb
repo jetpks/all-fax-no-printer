@@ -62,7 +62,7 @@ module Space
             end
 
             unless children.equal?(NOT_PROVIDED)
-              json[:children] = children.to_a.map { |c| { id: c.id, title: display_title(c), session_id: c.session_id } }
+              json[:children] = children.to_a.map { |c| { id: c.id, title: display_title(c), session_id: c.session_id, agent_role: c.agent_role } }
             end
           end
         end
