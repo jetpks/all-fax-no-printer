@@ -38,7 +38,13 @@ The UI leads with spaces: `/` and `/spaces` are the spaces index,
   live with a 15s heartbeat. Event vocabulary: `session_init` (the capture is
   live), `message_start`, `block_open`, `text_delta`, `tool_args_delta`,
   `block_close`, `message_complete`, `tool_result`, and the terminal
-  `conversation_complete` (the client closes the stream on it).
+  `conversation_complete` (the client closes the stream on it). The space
+  observation deck lives at `GET /spaces/:id/stream`: it muxes the space's
+  conversations' streams into one long-lived feed whose events carry
+  conversation identity (`conversation_id`/`agent_role`/`agent_name`/`tag`),
+  supports `Last-Event-ID` replay, pings a 15s heartbeat, and never ends on
+  `conversation_complete` (an ordinary event there — the stream closes only on
+  client disconnect).
 
 ## Setup
 
