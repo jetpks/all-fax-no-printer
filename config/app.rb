@@ -12,6 +12,12 @@ require "vite_hanami"
 
 module Space
   module Server
+    # 30 days, in seconds. Phone-first deck (BRIEF §1): iOS Safari discards a
+    # backgrounded tab's browser-session cookies, which bounced the phone out
+    # hourly. rack-session re-dates the expiry on every committing response,
+    # so the window slides with use.
+    SESSION_EXPIRE_AFTER = 2_592_000
+
     class App < Hanami::App
       config.settings_store = HanamiCredentials::Store.new(
         content_path: Pathname(__dir__).join("credentials.yml.enc"),
@@ -64,7 +70,8 @@ module Space
         # (a top-level GET from github.com) carrying the session while blocking
         # cross-site POST — matches the XSRF-TOKEN cookie's own lax posture.
         secure: settings.assume_ssl || settings.force_ssl,
-        same_site: :lax
+        same_site: :lax,
+        expire_after: SESSION_EXPIRE_AFTER
       }
       # csrf_protection defaults to true when sessions are enabled;
       # hanami-controller auto-disables it in HANAMI_ENV=test
