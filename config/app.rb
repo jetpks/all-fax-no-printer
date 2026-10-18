@@ -25,6 +25,11 @@ module Space
         key_path: Pathname(__dir__).join("master.key")
       )
 
+      # SQL query logging at :info. Hanami 3 defaults config.db.log_level to
+      # :debug, which would dump every SQL statement to the production log;
+      # :info preserves the 2.x-era log volume.
+      config.db.log_level = :info
+
       # Redirect 127.0.0.1 → localhost (Vite dev server uses localhost; this keeps
       # the browser and Vite on the same origin so HMR works). Port via Rack
       # middleware since hanami-router 2.3.1 has no host-constraint DSL.
@@ -40,14 +45,13 @@ module Space
         end
       end
 
-      # Prevents Hanami::Router#_params (hanami-router 2.3.1 lib/hanami/router.rb:991-993)
-      # from draining rack.input before the raw-body ingest actions read it.
-      # _params does rewind→read→rewind on rack.input when ROUTER_PARSED_BODY is
-      # absent — fatal twice over for a binary body: rack.input is consumed
-      # before the action reads it, and the drained bytes become router params,
-      # whose to_sym raises EncodingError on invalid-UTF-8 gzip/tar bytes.
-      # Setting ROUTER_PARSED_BODY here short-circuits _params for these routes
-      # only, leaving rack.input untouched for incremental reads/streaming.
+      # Guards the raw-body ingest route against the router/body-parser stack
+      # touching rack.input before the ingest actions read it. hanami-router
+      # 3.0.0's _form_urlencoded_body (lib/hanami/router.rb:1061) and
+      # Middleware::BodyParser#call (lib/hanami/middleware/body_parser.rb:37)
+      # both short-circuit when ROUTER_PARSED_BODY is present — so setting it
+      # here keeps the ingest stream untouched for incremental reads/streaming,
+      # by construction rather than by content-type.
       IngestBodyPassthrough = Class.new do
         RAW_BODY_ROUTES = %r{\A/conversations/ingest\z}
 
@@ -74,7 +78,7 @@ module Space
         expire_after: SESSION_EXPIRE_AFTER
       }
       # csrf_protection defaults to true when sessions are enabled;
-      # hanami-controller auto-disables it in HANAMI_ENV=test
+      # hanami-action auto-disables it in HANAMI_ENV=test
 
       # OmniAuth GitHub OAuth — on_failure routes to our failure action via redirect.
       # Captured here so the block below closes over resolved values (not the lazy setting).
@@ -117,18 +121,19 @@ module Space
       config.middleware.use HostRedirect
       config.middleware.use IngestBodyPassthrough
 
-      # JSON request bodies. Hanami
-      # already auto-appends a form+json Hanami::Middleware::BodyParser at the very end
-      # of the stack (Hanami::Config#use_body_parser_middleware, unconditional whenever
-      # hanami-router + hanami-controller are bundled — verified in hanami-2.3.2's
-      # config.rb), so JSON parsing technically works without this line. It's registered
-      # explicitly anyway so the JSON contract is legible here rather than resting on
-      # that implicit default, and so its position relative to IngestBodyPassthrough is
-      # pinned rather than incidental. Placed AFTER IngestBodyPassthrough: that
-      # middleware pre-sets ROUTER_PARSED_BODY for /conversations/ingest, and BodyParser's
-      # own `call` short-circuits whenever that key is already present — so the ingest
-      # stream is skipped by construction, not by content-type (application/x-ndjson)
-      # alone.
+      # JSON request bodies. Hanami 3 ships NO implicit body parser — the
+      # app config has no use_body_parser_middleware auto-append anymore, so
+      # without this line JSON bodies would never reach req.params. The symbol
+      # resolves at use-time to Hanami::Middleware::BodyParser (shipped by
+      # hanami-router, lib/hanami/middleware/body_parser.rb; the middleware
+      # stack's load_middleware_class requires it and classifies the symbol).
+      # Registered explicitly so the JSON contract is legible here, and so its
+      # position relative to IngestBodyPassthrough is pinned rather than
+      # incidental. Placed AFTER IngestBodyPassthrough: that middleware pre-sets
+      # ROUTER_PARSED_BODY ("router.parsed_body") for /conversations/ingest, and
+      # BodyParser's own `call` short-circuits whenever that key is already
+      # present (hanami-router 3.0.0 body_parser.rb:37) — so the ingest stream is
+      # skipped by construction, not by content-type (application/x-ndjson) alone.
       config.middleware.use :body_parser, :json
 
       # Dev-only: the Vite dev server (port 3036) serves ES modules cross-origin and injects an
