@@ -1,7 +1,7 @@
 import { useContext, useState } from 'react'
 import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light'
 import { ExpandClampsContext } from '@/lib/expand-clamps'
-import { nightOwl } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import nightOwl from 'react-syntax-highlighter/dist/esm/styles/prism/night-owl'
 import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
 import c from 'react-syntax-highlighter/dist/esm/languages/prism/c'
 import cpp from 'react-syntax-highlighter/dist/esm/languages/prism/cpp'
