@@ -13,5 +13,5 @@ Gem::Specification.new do |spec|
 
   spec.add_development_dependency "minitest"
   spec.add_development_dependency "rake"
-  spec.add_development_dependency "hanami-controller", "= 2.3.2"
+  spec.add_development_dependency "hanami-action", "= 3.0.1"
 end
