@@ -8,6 +8,12 @@ module Space
           iterations.where(space_id: space_id).order(:ordinal).to_a
         end
 
+        # The record read (GET /spaces/:space_id/iterations/:ordinal) — one
+        # iteration by (space_id, ordinal), nil when absent.
+        def find_by_ordinal(space_id, ordinal)
+          iterations.where(space_id: space_id, ordinal: ordinal).to_a.first
+        end
+
         def count_for_space(space_id)
           iterations.dataset.where(space_id: space_id).count
         end

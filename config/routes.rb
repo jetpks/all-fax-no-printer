@@ -24,6 +24,13 @@ module Space
       get "/spaces/:id/stream/history",        to: "spaces.stream_history"
       get "/spaces/:id/artifacts/:artifact_id", to: "spaces.artifact"
 
+      # Iterations — structured-record mouths (bearer); record read added by lane `surface`
+      post "/iterations/ingest/freeze",      to: "iterations.ingest_freeze"
+      post "/iterations/ingest/lane",        to: "iterations.ingest_lane"
+      post "/iterations/ingest/verdict",     to: "iterations.ingest_verdict"
+      post "/iterations/ingest/integration", to: "iterations.ingest_integration"
+      get  "/spaces/:id/iterations/:ordinal", to: "iterations.record"
+
       # Conversations
       get  "/conversations",            to: "conversations.index"
       get  "/conversations/:id",                to: "conversations.show"

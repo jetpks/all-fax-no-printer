@@ -487,3 +487,166 @@ class SpacesShowNarratorTest < Minitest::Test
     assert_nil props["narrator"]
   end
 end
+
+# I15 lane `surface` — the structured-record READ SURFACE on the spaces show
+# page: additive prop keys (branch/status/gates/lanes/verdict_detail) surfaced
+# ALONGSIDE the artifact-derived decisions path. Transcripts never enter page
+# props (phone-page weight) — full fidelity lives on the record endpoint.
+class SpacesShowStructuredPropsTest < Minitest::Test
+  include ActionTestHelper
+
+  TRANSCRIPT_MARKER = "RECORD-ONLY-TRANSCRIPT-do-not-leak-into-props"
+
+  def setup
+    setup_db
+    OmniAuth.config.test_mode = true
+    @owner = Factory[:user, github_uid: "i15-show-struct-owner", username: "i15-show-struct-owner"]
+    @repos = {
+      gates:            Space::Server::Repos::GatesRepo.new,
+      lanes:            Space::Server::Repos::LanesRepo.new,
+      gate_results:     Space::Server::Repos::GateResultsRepo.new,
+      verdicts:         Space::Server::Repos::VerdictsRepo.new,
+      verdict_rulings:  Space::Server::Repos::VerdictRulingsRepo.new
+    }
+  end
+
+  def teardown
+    OmniAuth.config.mock_auth[:github] = :csrf_detected
+  end
+
+  def seed_structured_store(space, iteration)
+    @repos[:gates].replace_for_iteration(iteration.id, [
+      { gate_id: "z-gate", ac: "AC2", cwd: "repos/x", cmd: "rake test", timeout: 600,
+        expect: { "exit_code" => 0, "stdout_match" => "OK" } },
+      { gate_id: "a-gate", ac: "AC1", cmd: "hanami db prepare", timeout: 60 }
+    ])
+    gates = @repos[:gates].for_iteration(iteration.id).to_h { |g| [g.gate_id, g] }
+
+    lane = @repos[:lanes].upsert_by_name(iteration.id, "surface", {
+      repo: "all-fax-no-printer", base_sha: "7398ccc", model: "glm-5.3", harness: "pi",
+      effort: "high", touch_set: ["config/routes.rb"], status: "complete",
+      bounds_override_reason: nil, escalations: [], merge_sha: "abc123",
+      integration_branch: "main", integrated_at: Time.now
+    })
+    @repos[:lanes].upsert_by_name(iteration.id, "mouths", {
+      repo: "all-fax-no-printer", status: "complete", touch_set: [], escalations: []
+    })
+    @repos[:gate_results].upsert(gates.fetch("a-gate").id, lane.id,
+                                 { status: "pass", reason: "", transcript: TRANSCRIPT_MARKER })
+    @repos[:gate_results].upsert(gates.fetch("z-gate").id, lane.id,
+                                 { status: "fail", reason: "boom" })
+
+    verdict = @repos[:verdicts].upsert_for_iteration(iteration.id,
+                                                     { decision: "continue", phase0_resolutions: [] })
+    @repos[:verdict_rulings].replace_for_verdict(verdict.id, [
+      { ac: "AC1", ruling: "pass", note: nil },
+      { ac: "AC2", ruling: "fail", note: "boom" }
+    ])
+    gates
+  end
+
+  def test_show_structured_props_full_shape
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "struct-props-space"]
+    iter  = Factory[:iteration, space_id: space.id, ordinal: 3, name: "iter-struct",
+                    freeze_sha: "da7c509a", branch: "main", status: "integrated", verdict: "continue"]
+    seed_structured_store(space, iter)
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iteration = parse_json(body)["props"]["iterations"].first
+
+    # Identity columns
+    assert_equal "main",       iteration["branch"]
+    assert_equal "integrated", iteration["status"]
+
+    # Gates: ordered by gate_id, definitions only
+    assert_equal ["a-gate", "z-gate"], iteration["gates"].map { |g| g["gate_id"] }
+    a_gate = iteration["gates"].first
+    assert_equal({ "gate_id" => "a-gate", "ac" => "AC1", "cwd" => nil,
+                   "cmd" => "hanami db prepare", "timeout" => 60.0,
+                   "expect" => nil }.keys.sort, a_gate.keys.sort)
+    assert_equal "hanami db prepare", a_gate["cmd"]
+    z_gate = iteration["gates"].last
+    assert_equal 0, z_gate["expect"]["exit_code"]
+    assert_equal "OK", z_gate["expect"]["stdout_match"]
+
+    # Lanes: ordered by name, gate results statuses only (no transcripts)
+    assert_equal ["mouths", "surface"], iteration["lanes"].map { |l| l["name"] }
+    surface = iteration["lanes"].last
+    assert_equal({ "name" => "surface", "repo" => "all-fax-no-printer", "base_sha" => "7398ccc",
+                   "model" => "glm-5.3", "harness" => "pi", "effort" => "high",
+                   "touch_set" => ["config/routes.rb"], "status" => "complete",
+                   "bounds_override_reason" => nil, "escalations" => [],
+                   "merge_sha" => "abc123", "integration_branch" => "main",
+                   "integrated_at" => nil, "gate_results" => nil }.keys.sort, surface.keys.sort)
+    assert Time.iso8601(surface["integrated_at"])
+    assert_equal ["a-gate", "z-gate"], surface["gate_results"].map { |r| r["gate_id"] }
+    assert_equal({ "gate_id" => "a-gate", "status" => "pass", "reason" => "" },
+                 surface["gate_results"].first)
+
+    # Verdict detail
+    assert_equal({ "decision" => "continue",
+                   "ac_rulings" => [{ "ac" => "AC1", "ruling" => "pass", "note" => nil },
+                                    { "ac" => "AC2", "ruling" => "fail", "note" => "boom" }],
+                   "phase0_resolutions" => [] }, iteration["verdict_detail"])
+  end
+
+  def test_show_transcripts_never_appear_in_props
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "struct-transcript-space"]
+    iter  = Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-transcript"]
+    seed_structured_store(space, iter)
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    refute_includes body.join, TRANSCRIPT_MARKER,
+      "a seeded transcript must never surface in the show props"
+  end
+
+  def test_show_no_modeled_data_renders_unchanged_page_plus_empty_defaults
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "struct-empty-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-bare"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iteration = parse_json(body)["props"]["iterations"].first
+
+    # Pre-existing keys all still present
+    ["id", "ordinal", "name", "freeze_sha", "verdict", "created_at",
+     "occurred_at", "occurred_at_utc_offset", "decisions", "artifacts"].each do |key|
+      assert iteration.key?(key), "pre-existing key #{key} must stay present"
+    end
+    # Additive keys default
+    assert_nil iteration["branch"]
+    assert_nil iteration["status"]
+    assert_equal [], iteration["gates"]
+    assert_equal [], iteration["lanes"]
+    assert_nil iteration["verdict_detail"]
+  end
+
+  def test_show_structured_props_do_not_disturb_decisions_path
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "struct-decisions-space"]
+    iter  = Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-both"]
+    Factory[:artifact, space_id: space.id, iteration_id: iter.id,
+            kind: "iteration", path: "architecture/I01.md", title: "I01",
+            raw: <<~MD]
+      ## Grounds
+
+      Structured-era grounds.
+
+      ## Verdict
+
+      continue
+    MD
+    seed_structured_store(space, iter)
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iteration = parse_json(body)["props"]["iterations"].first
+
+    assert_equal ["Grounds", "Verdict"], iteration["decisions"].map { |d| d["name"] },
+      "the artifact-derived decisions path must render exactly as before"
+    assert_match "Structured-era grounds", iteration["decisions"].first["body"]
+    assert_equal 2, iteration["gates"].length,
+      "modeled gates surface alongside decisions, not instead of them"
+  end
+end
