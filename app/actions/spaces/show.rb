@@ -15,7 +15,12 @@ module Space
             "repos.iterations_repo",
             "repos.artifacts_repo",
             "repos.conversations_repo",
-            "repos.messages_repo"
+            "repos.messages_repo",
+            "repos.gates_repo",
+            "repos.lanes_repo",
+            "repos.gate_results_repo",
+            "repos.verdicts_repo",
+            "repos.verdict_rulings_repo"
           ]
 
           def handle(req, res)
@@ -46,7 +51,12 @@ module Space
                 occurred_at:            iter.occurred_at&.iso8601(6),
                 occurred_at_utc_offset: iter.occurred_at_utc_offset,
                 decisions:              decisions_for(iter, iter_artifacts),
-                artifacts:              Array(iter_artifacts[iter.id]).map { |a| artifact_props(a) }
+                artifacts:              Array(iter_artifacts[iter.id]).map { |a| artifact_props(a) },
+                branch:                 iter.branch,
+                status:                 iter.status,
+                gates:                  gates_props(iter.id),
+                lanes:                  lanes_props(iter.id),
+                verdict_detail:         verdict_detail_props(iter.id)
               }
             end
 
@@ -84,6 +94,66 @@ module Space
 
           def artifact_props(a)
             { id: a.id, kind: a.kind, path: a.path, title: a.title }
+          end
+
+          # ── structured-record props (MODELED FIRST, additive) ─────────────────────
+          # The modeled store surfaces ALONGSIDE the artifact-derived decisions
+          # path above — these reads never supersede it, and an iteration with no
+          # modeled data still yields gates: [], lanes: [], verdict_detail: nil.
+          # Transcripts never enter page props (phone-page weight): gate results
+          # are statuses only; full fidelity lives on the record endpoint
+          # (GET /spaces/:id/iterations/:ordinal).
+
+          def gates_props(iteration_id)
+            gates_repo.for_iteration(iteration_id).map do |g|
+              { gate_id: g.gate_id, ac: g.ac, cwd: g.cwd, cmd: g.cmd,
+                timeout: timeout_json(g.timeout), expect: g.expect }
+            end
+          end
+
+          # pg numeric arrives as BigDecimal and JSON's BigDecimal path emits
+          # exponent form ("0.6e3") — emit a plain number instead (Integer when
+          # integral, Float otherwise).
+          def timeout_json(timeout)
+            return nil if timeout.nil?
+
+            timeout.is_a?(BigDecimal) && timeout == timeout.to_i ? timeout.to_i : timeout.to_f
+          end
+
+          def lanes_props(iteration_id)
+            gate_label = gates_repo.for_iteration(iteration_id).to_h { |g| [g.id, g.gate_id] }
+            lanes_repo.for_iteration(iteration_id).map do |l|
+              {
+                name:                   l.name,
+                repo:                   l.repo,
+                base_sha:               l.base_sha,
+                model:                  l.model,
+                harness:                l.harness,
+                effort:                 l.effort,
+                touch_set:              Array(l.touch_set),
+                status:                 l.status,
+                bounds_override_reason: l.bounds_override_reason,
+                escalations:            Array(l.escalations),
+                merge_sha:              l.merge_sha,
+                integration_branch:     l.integration_branch,
+                integrated_at:          l.integrated_at&.iso8601(6),
+                # Deterministic order: by gate_id label, not row-insertion order.
+                gate_results: gate_results_repo.for_lane(l.id)
+                                               .sort_by { |r| gate_label[r.iteration_gate_id].to_s }
+                                               .map { |r| { gate_id: gate_label[r.iteration_gate_id], status: r.status, reason: r.reason } }
+              }
+            end
+          end
+
+          def verdict_detail_props(iteration_id)
+            verdict = verdicts_repo.for_iteration(iteration_id)
+            return nil unless verdict
+
+            {
+              decision:           verdict.decision,
+              ac_rulings:         verdict_rulings_repo.for_verdict(verdict.id).map { |r| { ac: r.ac, ruling: r.ruling, note: r.note } },
+              phase0_resolutions: verdict.phase0_resolutions
+            }
           end
 
           def conversation_props(c)
