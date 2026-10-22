@@ -70,7 +70,7 @@ GEM
       bigdecimal
       samovar (~> 2.1)
     base64 (0.3.0)
-    bigdecimal (3.3.1)
+    bigdecimal (4.1.3)
     concurrent-ruby (1.3.8)
     console (1.36.0)
       fiber-annotation
@@ -427,7 +427,7 @@ CHECKSUMS
   auth-sanitizer (0.2.1) sha256=917dcf01f7589b06c26726afe90568cf2fb29d37a1f94facfc664f11967cc577
   bake (0.25.0) sha256=a47bdc6a26addc048827debc36fe27bb4d5d71ac2958ad910b5386e9baf49869
   base64 (0.3.0) sha256=27337aeabad6ffae05c265c450490628ef3ebd4b67be58257393227588f5a97b
-  bigdecimal (3.3.1) sha256=eaa01e228be54c4f9f53bf3cc34fe3d5e845c31963e7fcc5bedb05a4e7d52218
+  bigdecimal (4.1.3) sha256=61ebe1e5e559bdc3cc6f2c0ee7f427321fc838f59611c294356eb04d6e21cf66
   concurrent-ruby (1.3.8) sha256=b2f1be836e968ccc78ccfce277ea79c72a88633f22306782c16ff23fb415d1e1
   console (1.36.0) sha256=45599ea906cf80a73d8941f03abf873fe66a6a954e0bac5bc1c01e2cdc406f07
   csv (3.3.5) sha256=6e5134ac3383ef728b7f02725d9872934f523cb40b961479f69cf3afa6c8e73f
