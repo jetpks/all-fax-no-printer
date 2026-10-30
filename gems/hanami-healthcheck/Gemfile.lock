@@ -11,7 +11,7 @@ GEM
       drb (~> 2.0)
       prism (~> 1.5)
     prism (1.9.0)
-    rack (3.2.6)
+    rack (3.2.8)
     rake (13.4.2)
 
 PLATFORMS
@@ -29,11 +29,11 @@ CHECKSUMS
   hanami-healthcheck (0.1.0)
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
-  rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
+  rack (3.2.8) sha256=1fecc85e463ebc7a2a945fff829ffcd549babeb1556384796fad946c28dc4ec7
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
 
 RUBY VERSION
-  ruby 4.0.5
+  ruby 4.0.9
 
 BUNDLED WITH
   4.0.10
