@@ -23,7 +23,7 @@ COPY app/frontend app/frontend
 RUN npm run build
 
 # ── Stage 2: gems (compiler toolchain stays behind) ─────────────────────────
-FROM docker.io/library/ruby:4.0.5-slim AS gems
+FROM docker.io/library/ruby:4.0.9-slim AS gems
 WORKDIR /app
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       build-essential libpq-dev libyaml-dev \
@@ -37,7 +37,7 @@ ENV BUNDLE_PATH=vendor/bundle \
 RUN bundle install --jobs 4
 
 # ── Stage 3: runtime ─────────────────────────────────────────────────────────
-FROM docker.io/library/ruby:4.0.5-slim
+FROM docker.io/library/ruby:4.0.9-slim
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends libpq5 libyaml-0-2 postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --user-group --home /app --shell /usr/sbin/nologin app
