@@ -29,6 +29,7 @@ module Space
       post "/iterations/ingest/lane",        to: "iterations.ingest_lane"
       post "/iterations/ingest/verdict",     to: "iterations.ingest_verdict"
       post "/iterations/ingest/integration", to: "iterations.ingest_integration"
+      post "/iterations/ingest/phase",       to: "iterations.ingest_phase"
       get  "/spaces/:id/iterations/:ordinal", to: "iterations.record"
 
       # Conversations

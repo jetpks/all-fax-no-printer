@@ -172,7 +172,8 @@ class IterationsRecordActionTest < Minitest::Test
     iter = data["iteration"]
     assert_equal({ "id" => nil, "ordinal" => nil, "name" => nil, "slug" => nil,
                    "freeze_sha" => nil, "branch" => nil, "status" => nil,
-                   "verdict" => nil, "created_at" => nil, "occurred_at" => nil,
+                   "verdict" => nil, "phase_kind" => nil, "phase_at" => nil,
+                   "created_at" => nil, "occurred_at" => nil,
                    "gates" => nil, "lanes" => nil, "verdict_detail" => nil }.keys.sort,
                  iter.keys.sort, "record iteration keys must match the spec shape")
     assert_equal 7, iter["ordinal"]
@@ -250,5 +251,36 @@ class IterationsRecordActionTest < Minitest::Test
     assert_nil iter["verdict_detail"]
     assert_equal [], iter["lanes"]
     assert_equal "frozen", iter["status"]
+  end
+
+  # I11 narration-split (lane afnp) — the phase facet rides the record read:
+  # additive, nil-safe both ways (no ping → null; a ping lands → server-stamped
+  # values).
+  PHASE_PAYLOAD = {
+    iteration: { ordinal: 7, name: "structured-iterations-ingest" },
+    phase: { kind: "judge-running" }
+  }.freeze
+
+  def test_record_phase_keys_nil_safe_then_stamped
+    secret, = mint_token(@owner)
+    post_payload("/iterations/ingest/freeze", FREEZE_PAYLOAD, bearer: secret)
+    space = owner_space
+
+    status, _, body = get_with_bearer("/spaces/#{space.id}/iterations/7", bearer: secret)
+    assert_equal 200, status
+    iter = parse_json(body)["iteration"]
+    assert iter.key?("phase_kind"), "phase_kind key always present"
+    assert iter.key?("phase_at"), "phase_at key always present"
+    assert_nil iter["phase_kind"], "an iteration without a ping reads null"
+    assert_nil iter["phase_at"]
+
+    status, _, _ = post_payload("/iterations/ingest/phase", PHASE_PAYLOAD, bearer: secret)
+    assert_equal 200, status
+
+    status, _, body = get_with_bearer("/spaces/#{space.id}/iterations/7", bearer: secret)
+    assert_equal 200, status
+    iter = parse_json(body)["iteration"]
+    assert_equal "judge-running", iter["phase_kind"]
+    assert Time.iso8601(iter["phase_at"])
   end
 end

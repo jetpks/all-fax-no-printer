@@ -227,6 +227,11 @@ export type SpaceIteration = {
   name: string
   freeze_sha: string | null
   verdict: string | null
+  // Modeled phase facet (I11): the loop's CURRENT phase, server-stamped on the
+  // latest `architect ping`. null until a ping lands — additive, nil-safe both
+  // ways.
+  phase_kind?: string | null
+  phase_at?: string | null
   created_at?: string
   occurred_at?: string | null
   occurred_at_utc_offset?: number | null

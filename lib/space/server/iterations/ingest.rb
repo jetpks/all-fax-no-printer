@@ -3,8 +3,8 @@
 module Space
   module Server
     module Iterations
-      # The structured-record ingest semantics behind the four bearer mouths
-      # (POST /iterations/ingest/{freeze,lane,verdict,integration}). Actions
+      # The structured-record ingest semantics behind the five bearer mouths
+      # (POST /iterations/ingest/{freeze,lane,verdict,integration,phase}). Actions
       # stay thin: auth, slug, contract — then this service owns everything
       # else. Posture: MODELED FIRST — the JSON payload is the complete truth
       # for its facet: scalar fields upsert (present non-nil values overwrite,
@@ -123,6 +123,27 @@ module Space
           end
 
           { iteration: iteration, lanes_integrated: integrated }
+        end
+
+        # Mouth 5 — phase: the loop's CURRENT phase per iteration, pinged at
+        # each spec milestone. Scalar upsert on the iteration row: phase_kind
+        # restamps on every ping (kind is required), phase_at is the SERVER
+        # clock at ingest (the payload carries no timestamp — the server clock
+        # is the record's time base, as everywhere in I15), phase_note upserts
+        # only when present (an absent note leaves the stored one untouched).
+        # Order-tolerant: a spec-launched ping may arrive BEFORE the freeze
+        # emission and creates the iteration stub. Free text at the mouth — the
+        # emitting CLI pins the vocabulary (spec-launched / builders-settled /
+        # judge-running).
+        def phase(space_id, payload)
+          iteration = resolve_iteration(space_id, payload[:iteration])
+          phase_payload = payload[:phase]
+
+          attrs = { phase_kind: phase_payload[:kind], phase_at: Time.now }
+          attrs[:phase_note] = phase_payload[:note] if phase_payload[:note]
+          iteration = @iterations_repo.upsert_by_ordinal(space_id, iteration.ordinal, attrs)
+
+          { iteration: iteration, phase_applied: true }
         end
 
         private

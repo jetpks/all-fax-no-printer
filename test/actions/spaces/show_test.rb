@@ -650,3 +650,52 @@ class SpacesShowStructuredPropsTest < Minitest::Test
       "modeled gates surface alongside decisions, not instead of them"
   end
 end
+
+# I11 narration-split (lane afnp) — the phase facet on the show page props:
+# additive, MODELED FIRST, nil when an iteration carries no ping (the same
+# "nil when absent" discipline as the other structured keys).
+class SpacesShowPhasePropsTest < Minitest::Test
+  include ActionTestHelper
+
+  def setup
+    setup_db
+    OmniAuth.config.test_mode = true
+    @owner = Factory[:user, github_uid: "i11-show-phase-owner", username: "i11-show-phase-owner"]
+  end
+
+  def teardown
+    OmniAuth.config.mock_auth[:github] = :csrf_detected
+  end
+
+  def test_show_props_carry_phase_keys_nil_without_ping
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "phase-nil-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-no-ping"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iteration = parse_json(body)["props"]["iterations"].first
+
+    assert iteration.key?("phase_kind"), "phase_kind key must always be present"
+    assert iteration.key?("phase_at"), "phase_at key must always be present"
+    assert_nil iteration["phase_kind"]
+    assert_nil iteration["phase_at"]
+  end
+
+  def test_show_props_carry_phase_values_only_for_pinged_iterations
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "phase-set-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-pinged",
+            phase_kind: "builders-settled", phase_at: Time.now]
+    Factory[:iteration, space_id: space.id, ordinal: 2, name: "iter-bare"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iterations = parse_json(body)["props"]["iterations"]
+    pinged = iterations.find { |i| i["name"] == "iter-pinged" }
+    bare   = iterations.find { |i| i["name"] == "iter-bare" }
+
+    assert_equal "builders-settled", pinged["phase_kind"]
+    assert Time.iso8601(pinged["phase_at"])
+    assert_nil bare["phase_kind"], "nil when this iteration carries no ping"
+    assert_nil bare["phase_at"]
+  end
+end

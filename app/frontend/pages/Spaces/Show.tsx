@@ -106,6 +106,11 @@ function IterationSection({
             {iteration.verdict}
           </Badge>
         )}
+        {iteration.phase_kind && (
+          <Badge variant="outline" data-testid="phase-chip">
+            {iteration.phase_kind}
+          </Badge>
+        )}
         {iteration.occurred_at && (
           <span className="ml-auto text-xs text-muted-foreground">
             {relativeTime(iteration.occurred_at)}
@@ -154,6 +159,14 @@ export default function Show({
   // ascending timeline sort is the defect this layout kills).
   const sortedIterations = [...iterations].sort((a, b) => a.ordinal - b.ordinal)
 
+  // Rolled-up "where is the loop now": the highest-ordinal iteration carrying
+  // a modeled phase ping. Derived ONLY from phase data — no LiveLog/stream/
+  // session-sink coupling, no inference from conversation titles; omitted
+  // entirely when no iteration carries a phase.
+  const phaseCarrier = [...iterations]
+    .filter((iter) => iter.phase_kind != null)
+    .sort((a, b) => b.ordinal - a.ordinal)[0]
+
   return (
     <AppLayout>
       <Head title={space.title} />
@@ -175,8 +188,30 @@ export default function Show({
         )}
       </header>
 
-      {/* The deck, top to bottom: live log of the whole space, last narrator
-          message, newest-first conversations, iterations, other artifacts. */}
+      {/* The deck, top to bottom: rolled-up loop-phase line, live log of the
+          whole space, last narrator message, newest-first conversations,
+          iterations, other artifacts. */}
+      {phaseCarrier && (
+        <section
+          data-testid="loop-phase-line"
+          className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm"
+        >
+          <span className="font-medium">Loop phase</span>
+          <a
+            href={`#iteration-${phaseCarrier.id}`}
+            className="text-muted-foreground hover:text-foreground hover:underline"
+          >
+            I{String(phaseCarrier.ordinal).padStart(2, '0')} · {phaseCarrier.name}
+          </a>
+          <Badge variant="outline">{phaseCarrier.phase_kind}</Badge>
+          {phaseCarrier.phase_at && (
+            <span className="ml-auto text-xs text-muted-foreground">
+              {relativeTime(phaseCarrier.phase_at)}
+            </span>
+          )}
+        </section>
+      )}
+
       <section className="mb-6">
         <h2 className="mb-2 text-lg font-semibold">Live</h2>
         <LiveLog spaceId={space.id} />

@@ -200,7 +200,10 @@ CREATE TABLE public.iterations (
     updated_at timestamp with time zone NOT NULL,
     occurred_at timestamp with time zone,
     occurred_at_utc_offset integer,
-    branch text
+    branch text,
+    phase_kind text,
+    phase_at timestamp with time zone,
+    phase_note text
 );
 
 
@@ -790,4 +793,5 @@ INSERT INTO schema_migrations (filename) VALUES
 ('20260722000000_create_api_tokens.rb'),
 ('20261015000000_i06_server_cut_drop_collab_and_harness_tables.rb'),
 ('20261018000000_fold_runs_into_conversations.rb'),
-('20261019000001_create_iteration_record_tables.rb');
+('20261019000001_create_iteration_record_tables.rb'),
+('20261020000000_add_phase_to_iterations.rb');

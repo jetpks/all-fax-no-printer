@@ -47,6 +47,8 @@ module Space
                 name:                   iter.name,
                 freeze_sha:             iter.freeze_sha,
                 verdict:                iter.verdict,
+                phase_kind:             iter.phase_kind,
+                phase_at:               iter.phase_at&.iso8601(6),
                 created_at:             iter.created_at.iso8601(6),
                 occurred_at:            iter.occurred_at&.iso8601(6),
                 occurred_at_utc_offset: iter.occurred_at_utc_offset,
