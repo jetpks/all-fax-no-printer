@@ -48,6 +48,8 @@ module Space
               branch:      iteration.branch,
               status:      iteration.status,
               verdict:     iteration.verdict,
+              phase_kind:  iteration.phase_kind,
+              phase_at:    iteration.phase_at&.iso8601(6),
               created_at:  iteration.created_at&.iso8601(6),
               occurred_at: iteration.occurred_at&.iso8601(6),
               gates:          gates.map { |g| gate_json(g) },

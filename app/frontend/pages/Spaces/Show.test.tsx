@@ -236,4 +236,54 @@ describe('Spaces/Show', () => {
     const { container } = render(<Show {...DEFAULT_PROPS} iterations={[iter]} />)
     expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d/)
   })
+
+  // I11 narration-split — the rolled-up "where is the loop now" line.
+
+  it('renders the loop-phase line from the highest-ordinal phase carrier', () => {
+    const carriers: SpaceIteration[] = [
+      { ...ITERATION_1, phase_kind: 'spec-launched', phase_at: '2026-06-01T00:00:00Z' },
+      { ...ITERATION_2, phase_kind: 'builders-settled', phase_at: '2026-06-02T00:00:00Z' },
+    ]
+    render(<Show {...DEFAULT_PROPS} iterations={carriers} />)
+    const line = screen.getByTestId('loop-phase-line')
+    // Highest ordinal wins: iteration 11 (ordinal 2), not iteration 10.
+    expect(line.querySelector('a')!.getAttribute('href')).toBe('#iteration-11')
+    expect(line.textContent).toContain('second-iter')
+    expect(line.textContent).not.toContain('first-iter')
+    expect(line.textContent).toContain('builders-settled')
+    expect(line.textContent).toMatch(/ago|just now/)
+  })
+
+  it('renders a phase chip beside the verdict badge for an iteration that carries one', () => {
+    const { container } = render(
+      <Show
+        {...DEFAULT_PROPS}
+        iterations={[{ ...ITERATION_1, phase_kind: 'judge-running' }, ITERATION_2]}
+      />,
+    )
+    const phased = container.querySelector('#iteration-10')!
+    expect(phased.querySelector('[data-testid="phase-chip"]')!.textContent).toBe('judge-running')
+    // Beside the verdict badge: both render in the same header.
+    expect(screen.queryByText('continue')).not.toBeNull()
+    // An iteration without a ping carries no chip.
+    const bare = container.querySelector('#iteration-11')!
+    expect(bare.querySelector('[data-testid="phase-chip"]')).toBeNull()
+  })
+
+  it('omits the loop-phase line entirely when no iteration carries a phase', () => {
+    render(<Show {...DEFAULT_PROPS} />)
+    expect(screen.queryByTestId('loop-phase-line')).toBeNull()
+  })
+
+  it('places the loop-phase line above the live log', () => {
+    const { container } = render(
+      <Show
+        {...DEFAULT_PROPS}
+        iterations={[{ ...ITERATION_2, phase_kind: 'judge-running', phase_at: '2026-06-02T00:00:00Z' }]}
+      />,
+    )
+    const line = screen.getByTestId('loop-phase-line')
+    const liveLog = container.querySelector('[data-testid="live-log"]')!
+    expect((line.compareDocumentPosition(liveLog) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
+  })
 })
