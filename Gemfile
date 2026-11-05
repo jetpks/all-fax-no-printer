@@ -30,7 +30,7 @@ gem "async-redis", "0.14.0"
 # Persistence
 gem "rom", "5.4.3"
 gem "rom-sql", "3.7.0"
-gem "sequel", "5.109.0"
+gem "sequel", "5.110.0"
 gem "pg", "1.7.0"
 
 # dry-rb suite
