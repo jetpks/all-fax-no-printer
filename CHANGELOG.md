@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- typescript 6.0.3 → 7.0.2 (dev toolchain; supersedes dependabot #14,
+  whose CI failed because TS7 rejects named imports from the app's
+  `export =` prism-styles shim). The shim now declares `nightOwl` as a
+  merging named export — no runtime change.
+- Dependency refresh round: sequel 5.110.0 + minitest 6.1.0 (re-lands
+  the surviving half of dependabot #42, closed obsolete after the Ruby
+  bump rewrote the lock); npm dev group (@types/node 26, jsdom 31,
+  vite 8.3.7, vitest 5.1), axios 1.20, lucide-react 1.61, shadcn
+  4.22.1, and the docker/* GitHub Actions bumps.
 - Bumped Ruby 4.0.9 → 4.0.10 (security release): toolchain (`mise.toml`,
   `.ruby-version`), `Gemfile`/`Gemfile.lock` for the app and all five
   in-tree gems, and the `ruby:4.0.10-slim` Containerfile base image.

@@ -14,7 +14,10 @@ declare module 'react-syntax-highlighter/dist/esm/prism-light' {
   export default SyntaxHighlighter
 }
 
+// @types declares this barrel but omits nightOwl (it only ships a handful of
+// prism theme names). Merge the missing member in as a named export — matches
+// the @types declaration style so the two ambient blocks merge cleanly
+// (TS7 rejects the previous `export =` Record here for named imports).
 declare module 'react-syntax-highlighter/dist/esm/styles/prism' {
-  const styles: Record<string, Record<string, React.CSSProperties>>
-  export = styles
+  export const nightOwl: Record<string, React.CSSProperties>
 }
