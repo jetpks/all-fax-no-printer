@@ -2,7 +2,7 @@
 
 source "https://rubygems.org"
 
-ruby "4.0.9"
+ruby "4.0.10"
 
 # In-tree gems
 gem "hanami-credentials", path: "gems/hanami-credentials"
