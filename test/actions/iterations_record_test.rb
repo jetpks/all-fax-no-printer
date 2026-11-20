@@ -18,7 +18,7 @@ class IterationsRecordActionTest < Minitest::Test
     },
     gates: [
       { id: "allfax-ruby-suite", ac: "AC2", cwd: "repos/all-fax-no-printer",
-        cmd: "mise exec ruby@4.0.5 -- bundle exec rake test", timeout: 600, expect: GATE_EXPECT },
+        cmd: "mise exec ruby -- bundle exec rake test", timeout: 600, expect: GATE_EXPECT },
       { id: "iter-db-prepare", ac: "AC1", cmd: "bundle exec hanami db prepare" }
     ]
   }.freeze

@@ -139,8 +139,9 @@ the token row. Failed bearer attempts warn-log request path and outcome only
 
 ## Deploy
 
-Production serves from `studio.slush.systems` via the `deploy/ansible` role —
-see [docs/how-to/deploy-on-the-studio.md](docs/how-to/deploy-on-the-studio.md).
+Production serves from `fax.slush.systems` — a container on sombrero,
+continuously deployed by ansible-pull from
+`ghcr.io/jetpks/all-fax-no-printer:main` (built by this repo's CI).
 
 ## Retention & Cleanup (v1: manual)
 
